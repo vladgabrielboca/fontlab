@@ -185,6 +185,28 @@ class JetBrainsMono(Package):
         return Manifest(f"{self.VERSION} on {regular.name}", ["400", *WEIGHTS], [str(regular), str(italic)])
 
 
+class GoogleSansFlex(Package):
+    id, name = "googlesans", "Google Sans Flex"
+    summary = ("Fills in for Google Sans when Google's pages don't load it (search titles). "
+               "Stock weight. Downloaded from github.com/google/fonts.")
+    optional = True
+    COMMIT = "fa826bb2a3e26df8c1bee99351fc0d039aeed7d2"
+    BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/googlesansflex"
+    FONT = "GoogleSansFlex[ROND,opsz,slnt,wdth,wght].ttf"
+    URL = f"{BASE}/GoogleSansFlex%5BROND,opsz,slnt,wdth,wght%5D.ttf"
+    SHA256 = "a9ac770798857d5e8ac593ced42b22e40a7c08cec98319f92b0eccc2783a77ba"
+    OFL_URL = f"{BASE}/OFL.txt"
+    OFL_SHA256 = "fc13d69f63e36d284b6e383d4d1463d8ad404f0aa065e57cf961252d51063137"
+
+    def build(self, stage, work, progress, folder):
+        # One variable font. Its named instances (Regular, Medium, Bold...) sit at opsz 18
+        # and normal width, the same defaults as Google's web font, so it ships as is.
+        (stage / "400").mkdir()
+        fetch(self.URL, stage / "400" / self.FONT, progress, self.SHA256)
+        fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
+        return Manifest("5.000 " + self.COMMIT[:7])
+
+
 class SFPro(Package):
     id, name = "sf", "SF Pro (Apple)"
     summary = "Apple's system fonts: SF Pro, SF Mono, New York. Downloaded from Apple, needs 7-Zip."
@@ -264,7 +286,8 @@ class WindowsFonts(Package):
         return Manifest(f"imported from {folder}")
 
 
-PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), SFPro(), WindowsFonts())
+PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), GoogleSansFlex(), SFPro(),
+                                  WindowsFonts())
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 __all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "ToolError", "WEIGHTS"]

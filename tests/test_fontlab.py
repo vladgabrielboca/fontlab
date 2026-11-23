@@ -147,6 +147,16 @@ class FontsTest(TempHome):
         fonts.install(dict(DEFAULTS))
         self.assertFalse(self.installed("sf").exists())
 
+    def test_google_sans_ignores_weight_and_darkening(self) -> None:
+        self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "googlesans"))
+        self.fake_package("googlesans", {"400": ["GoogleSansFlex[wght].ttf"]})
+        st = dict(DEFAULTS, ui_weight="450", darkening="0.50")
+        sets = fonts.plan(st)
+        gs = next(fs for fs in sets if fs.family.package == "googlesans")
+        self.assertEqual(gs.darken, 0.0)
+        self.assertEqual([p.name for p in gs.sources], ["GoogleSansFlex[wght].ttf"])
+        self.assertTrue(fonts.installed(sets, "googlesans"))
+
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
         self.fake_package("inter", {"400": ["Inter-Regular.ttf"]}, version="2")
@@ -191,6 +201,13 @@ class FontconfigTest(TempHome):
         bold = fontconfig.render_conf(dict(DEFAULTS, small_bold="on"), [])
         # fake bold comes before the icon rules, so icons win
         self.assertLess(bold.index("pixelsize"), bold.index("Icon fonts"))
+
+    def test_google_sans_aliases(self) -> None:
+        self.assertNotIn("Google Sans", fontconfig.render_conf(dict(DEFAULTS), []))
+        xml = fontconfig.render_conf(dict(DEFAULTS), [], google_sans=True)
+        for name in fontconfig.GOOGLE_SANS_NAMES:
+            self.assertIn(f"<string>{name}</string>", xml)
+        self.assertIn('binding="strong"><string>Google Sans Flex</string>', xml)
 
     def test_web_conf(self) -> None:
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS), inter_available=True))

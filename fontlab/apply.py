@@ -40,7 +40,8 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
 
     progress("fontconfig")
     rejects = [g for fs in sets for g in fs.rejects]
-    conf_changed = write_if_changed(paths.P.render_conf, fontconfig.render_conf(state, rejects))
+    conf_changed = write_if_changed(paths.P.render_conf, fontconfig.render_conf(
+        state, rejects, google_sans=fonts.installed(sets, "googlesans")))
     web = fontconfig.web_conf(state, inter_available=ctx.has("inter"))
     conf_changed |= write_if_changed(paths.P.web_conf, web) if web else remove(paths.P.web_conf)
     if conf_changed:

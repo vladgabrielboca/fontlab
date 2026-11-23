@@ -35,7 +35,7 @@ class FontError(RuntimeError):
 @dataclass(frozen=True)
 class Family:
     package: str
-    weight_key: str          # setting that picks the weight
+    weight_key: str | None   # setting that picks the weight; None = always 400
     darkens: bool            # gets the `darkening` setting (TrueType outlines only)
     system_base: bool = False   # weight 400 is the system font itself: install nothing
 
@@ -45,6 +45,7 @@ FAMILIES: tuple[Family, ...] = (
     Family("adwaita", "ui_weight", darkens=True),
     Family("jbm", "mono_weight", darkens=False, system_base=True),
     Family("sf", "sf_weight", darkens=False),
+    Family("googlesans", None, darkens=False),
 )
 
 
@@ -83,13 +84,18 @@ def plan(state: State) -> list[FontSet]:
         if manifest is None:
             sets.append(FontSet(family, "", (), 0.0, ()))
             continue
-        weight = state[family.weight_key]
+        weight = state[family.weight_key] if family.weight_key else "400"
         darken = float(state["darkening"]) if family.darkens else 0.0
         key = weight if darken == 0 else f"{weight}-d{state['darkening']}"
         key += "-" + hashlib.sha1(manifest.version.encode()).hexdigest()[:6]   # rebuild on reinstall
         files = tuple(source_files(family, manifest, weight))
         sets.append(FontSet(family, key, files, darken, tuple(manifest.replaces)))
     return sets
+
+
+def installed(sets: list[FontSet], package: str) -> bool:
+    """Whether the plan installs any files for this package."""
+    return any(fs.sources for fs in sets if fs.family.package == package)
 
 
 def _build_dir(fs: FontSet) -> Path:

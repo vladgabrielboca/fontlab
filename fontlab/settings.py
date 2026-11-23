@@ -43,8 +43,8 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("lcdfilter", "Rendering", "LCD filter", ("default", "light", "legacy", "none"), "light",
             "Subpixel colour filter. FreeType apps only (GTK, terminal); Chromium ignores it."),
     Setting("small_bold", "Rendering", "Fake bold under 14px", ("off", "on"), "off",
-            "fontconfig's synthetic bold for text smaller than 14 pixels. Some apps ignore it. "
-            "Icon fonts are left out."),
+            "fontconfig's synthetic bold for text smaller than 14 pixels. GTK apps use it; "
+            "Chromium and Qt ignore it. Icon fonts are left out."),
     # Fonts: files built and installed into ~/.local/share/fonts/fontlab.
     Setting("darkening", "Fonts", "Darkening", steps(0, 1, 0.05, 2), "0.00",
             "macOS-style stem darkening baked into Inter and Adwaita Sans. 1 = macOS strength.",

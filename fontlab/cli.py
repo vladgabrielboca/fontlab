@@ -113,8 +113,8 @@ def cmd_fonts(args) -> None:
             mark = "✓" if m else " "
             detail = m.version if m else (p.blocker() if not p.needs_folder else None) or "not installed"
             kind = "optional" if p.optional else ""
-            print(f" {mark} {p.id:<8} {p.name:<18} {kind:<9} {detail}")
-            print(f"   {'':<8} {p.summary}")
+            print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
+            print(f"   {'':<10} {p.summary}")
         found = WindowsFonts.detect()
         if found:
             print("\nWindows fonts found at: " + ", ".join(map(str, found)))

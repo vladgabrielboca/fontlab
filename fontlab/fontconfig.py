@@ -1,7 +1,9 @@
 """fontconfig files fontlab generates.
 
 70-fontlab-render.conf  antialiasing, hinting, LCD filter, fake bold, icon fonts and
-                        Droid Sans when darkening is on, hidden system fonts
+                        Droid Sans when darkening is on, hidden system fonts, Google Sans
+                        aliases (here, not in 71, so they also hold for "system" and reach
+                        Chromium's private config for "windows")
 71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to (absent for "system")
 """
 
@@ -55,6 +57,8 @@ ICON_FAMILIES = (("contains", "Font Awesome"), ("eq", "codicon"), ("eq", "Symbol
                  ("eq", "Material Symbols"), ("eq", "Google Symbols"))
 NO_DARKEN = ('    <edit name="hinting" mode="assign"><bool>false</bool></edit>\n'
              '    <edit name="embolden" mode="assign"><bool>false</bool></edit>\n')
+# Google's pages ask for these by name and only sometimes load them as web fonts.
+GOOGLE_SANS_NAMES = ("Google Sans", "Google Sans Text", "Google Sans Display")
 # Stem darkening makes its CJK letters too heavy; Noto CJK takes over.
 DARKENING_REJECTS = ("Droid Sans Fallback", "Droid Sans Japanese")
 
@@ -85,7 +89,8 @@ def _hint_edits(style: str, indent: str) -> str:
             f'{indent}<edit name="hintstyle" mode="assign"><const>hint{style}</const></edit>\n')
 
 
-def render_conf(state: State, rejects: Iterable[str]) -> str:
+def render_conf(state: State, rejects: Iterable[str], google_sans: bool = False) -> str:
+    """google_sans: the Google Sans Flex package is installed; alias Google's names to it."""
     out = HEADER + "<fontconfig>\n"
     out += '  <match target="font">\n'
     out += '    <edit name="antialias" mode="assign"><bool>true</bool></edit>\n'
@@ -102,6 +107,9 @@ def render_conf(state: State, rejects: Iterable[str]) -> str:
         out += '    <test name="pixelsize" compare="less"><double>14</double></test>\n'
         out += '    <edit name="embolden" mode="assign"><bool>true</bool></edit>\n'
         out += "  </match>\n"
+    if google_sans:
+        out += "  <!-- Google Sans Flex stands in for Google's fonts when a page does not load them. -->\n"
+        out += _aliases(GOOGLE_SANS_NAMES, "Google Sans Flex")
     darken = darkening_on(state)
     if darken:
         out += icon_rules()     # after the hinting and embolden rules, so it wins

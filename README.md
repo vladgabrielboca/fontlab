@@ -74,7 +74,7 @@ a new terminal window for terminal fonts.
 | hinting | how hard letters snap to the pixel grid: none, slight, medium, full |
 | mono_hinting | the same, for monospace fonts in your terminal and editor |
 | lcdfilter | colour filter for subpixel text. Chromium ignores it |
-| small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. Some apps ignore it |
+| small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. GTK apps use it; Chromium and Qt ignore it |
 | darkening | makes Inter and Adwaita Sans thicker the way macOS does it, from 0 to 1 |
 | ui_weight | weight of Inter and Adwaita Sans, from 400 (normal) to 500 |
 | mono_weight | weight of JetBrains Mono |
@@ -102,6 +102,7 @@ The repo has no font files in it. fontlab downloads or builds each one on your c
 | Inter | downloaded from github.com/rsms/inter |
 | Adwaita Sans | built from the copy your system already has |
 | JetBrains Mono | downloaded, then built on top of your installed JetBrains Mono or its Nerd Font version, so the icons still work |
+| Google Sans Flex | downloaded from github.com/google/fonts, optional. Google's pages ask for "Google Sans" by name but don't always load it, so without a local copy the same search titles switch between Inter and Google's font. fontlab points "Google Sans", "Google Sans Text" and "Google Sans Display" at it. It stays at its stock weight, with no darkening |
 | SF Pro | downloaded from Apple, or added from a folder |
 | Windows 11 fonts | copied from a Windows Fonts folder. fontlab looks for mounted Windows drives. Only Chromium apps use them |
 
@@ -155,7 +156,8 @@ to delete those as well. `/etc/environment` stays as it is. To reset it first, r
 The darkening code is a Python port of FreeType's `FT_Outline_EmboldenXY`. The macOS
 strength values come from the Pathfinder project. The `strong` FreeType values, the
 icon font rules and the Droid Sans rule follow [lucidglyph](https://github.com/maximilionus/lucidglyph). Inter is by Rasmus
-Andersson and JetBrains Mono is by JetBrains, both under the SIL Open Font License.
+Andersson, JetBrains Mono is by JetBrains and Google Sans Flex is by Google, all under the
+SIL Open Font License.
 
 ## License
 
