@@ -1,9 +1,8 @@
 """Every file and directory fontlab reads or writes, in one place.
 
 fontlab owns everything listed under "outputs". Nothing else should write there,
-and fontlab writes nowhere else, except for two shared files it edits line by line:
-the Chromium/Brave flags files (only the --text-contrast/--text-gamma lines) and
-/etc/environment (only the FREETYPE_PROPERTIES line).
+and fontlab writes nowhere else, except for /etc/environment, where it edits only
+the FREETYPE_PROPERTIES line, and the gsettings font keys.
 """
 
 from __future__ import annotations
@@ -28,9 +27,9 @@ class Paths:
         return self.home / ".local/share/fontlab/sources"
 
     @property
-    def ms_fonts(self) -> Path:
-        """Windows 11 fonts. Never scanned by the normal fontconfig, Chromium only."""
-        return self.home / ".local/share/ms-fonts"
+    def windows_fonts(self) -> Path:
+        """Windows fonts package. Not under a scanned font folder: Chromium only."""
+        return self.sources / "windows/fonts"
 
     # --- state --------------------------------------------------------------
     @property
@@ -64,7 +63,7 @@ class Paths:
 
     @property
     def chromium_text_conf(self) -> Path:
-        """Read by the LD_PRELOAD shim (chromium/text-shim.c)."""
+        """Read by chromium-env.sh (wrapper flags) and the LD_PRELOAD shim (chromium/text-shim.c)."""
         return self.config_dir / "chromium-text.conf"
 
     @property
@@ -72,11 +71,6 @@ class Paths:
         """Private fontconfig for Chromium-family apps, only when web_fonts = windows.
         chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
         return self.config_dir / "chromium-fonts.conf"
-
-    @property
-    def chromium_flags_files(self) -> list[Path]:
-        return [self.home / ".config/chromium-flags.conf",
-                self.home / ".config/brave-origin-flags.conf"]
 
     @property
     def runtime_dir(self) -> Path:

@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
+from pathlib import Path
 
-from . import fonts, state as statefile
-from .apply import Report, apply
+from . import chromium, desktop, fonts, paths, state as statefile, toolchain
+from .apply import Report, apply, uninstall
+from .availability import Context
+from .download import DownloadError
+from .packages import BY_ID, PACKAGES, PackageError, WindowsFonts
 from .settings import BY_KEY, SETTINGS
 from .state import StateError
 
 EPILOG = """examples:
   fontlab                          open the interactive screen
-  fontlab status                   show every setting
+  fontlab fonts                    font packages and whether they are installed
+  fontlab fonts install inter
+  fontlab fonts install sf --accept-license
+  fontlab fonts install windows --from /run/media/me/Windows/Windows/Fonts
   fontlab set gamma=1.4 hinting=slight
-  fontlab preset save mac-half     save the current settings
-  fontlab preset load mac-half
-  fontlab apply --system           also write /etc/environment (sudo)
+  fontlab preset save mac-half
+  fontlab doctor                   check this system
 """
+
+ERRORS = (StateError, fonts.FontError, PackageError, DownloadError, toolchain.ToolError, FileNotFoundError)
 
 
 def print_report(report: Report) -> None:
@@ -25,23 +34,29 @@ def print_report(report: Report) -> None:
     for notice in report.notices:
         print(f"! {notice}")
     if report.changed:
-        print("Restart Chromium/Electron/GTK apps to see it (new terminal window for terminal fonts).")
+        print("Restart apps to see it (new terminal window for terminal fonts).")
 
 
 def cmd_status(_args) -> None:
-    st = statefile.load()
+    st, ctx = statefile.load(), Context.detect()
     group = None
     for s in SETTINGS:
         if s.group != group:
             group = s.group
             print(f"\n{group}")
-        note = "" if st[s.key] == s.default else f"   (default {s.default})"
+        reason = ctx.blocker(s.key, st[s.key])
+        note = f"   (unavailable: {reason})" if reason else \
+            "" if st[s.key] == s.default else f"   (default {s.default})"
         print(f"  {s.key:<20} {st[s.key]}{note}")
 
 
 def cmd_list(_args) -> None:
+    ctx = Context.detect()
     for s in SETTINGS:
-        print(f"{s.key:<20} {' '.join(s.choices)}\n{'':<20} {s.help}")
+        usable = ctx.choices(s)
+        shown = " ".join(c if c in usable else f"({c})" for c in s.choices)
+        print(f"{s.key:<20} {shown}\n{'':<20} {s.help}")
+    print("\n(choice) = needs a font package or the Chromium shim, see: fontlab fonts")
 
 
 def cmd_get(args) -> None:
@@ -53,13 +68,15 @@ def cmd_get(args) -> None:
 
 
 def cmd_set(args) -> None:
-    st = statefile.load()
+    st, ctx = statefile.load(), Context.detect()
     for pair in args.pairs:
         key, sep, value = pair.partition("=")
         if not sep:
             raise StateError(f"expected key=value, got '{pair}'")
         value = statefile.normalize(key, value)
         statefile.validate(key, value)
+        if reason := ctx.blocker(key, value):
+            raise StateError(f"{key}={value}: {reason}. See: fontlab fonts")
         st[key] = value
     statefile.save(st)
     print_report(apply(st, system=args.system))
@@ -87,12 +104,69 @@ def cmd_preset(args) -> None:
         print_report(apply(st, system=args.system))
 
 
+def cmd_fonts(args) -> None:
+    if args.action is None:
+        for p in PACKAGES:
+            m = p.manifest()
+            mark = "✓" if m else " "
+            detail = m.version if m else (p.blocker() if not p.needs_folder else None) or "not installed"
+            kind = "optional" if p.optional else ""
+            print(f" {mark} {p.id:<8} {p.name:<18} {kind:<9} {detail}")
+            print(f"   {'':<8} {p.summary}")
+        found = WindowsFonts.detect()
+        if found:
+            print("\nWindows fonts found at: " + ", ".join(map(str, found)))
+        return
+    if not args.package or args.package not in BY_ID:
+        raise StateError(f"fonts {args.action} needs a package: {' '.join(BY_ID)}")
+    pkg = BY_ID[args.package]
+    if args.action == "remove":
+        pkg.remove()
+        print(f"removed {pkg.name}")
+        print_report(apply(statefile.load()))
+        return
+    if pkg.license_note and not args.accept_license:
+        raise StateError(f"{pkg.license_note}\nRun again with --accept-license to install.")
+    folder = Path(args.from_dir).expanduser() if args.from_dir else None
+    manifest = pkg.install(lambda msg: print(f"  {msg}", end="\r" if "%" in msg else "\n", flush=True),
+                           folder)
+    print(f"\ninstalled {pkg.name} ({manifest.version})")
+    print_report(apply(statefile.load()))
+
+
+def cmd_doctor(_args) -> None:
+    ok, warn = "✓", "!"
+
+    def line(good: bool, text: str) -> None:
+        print(f" {ok if good else warn} {text}")
+
+    line(sys.version_info >= (3, 11), f"Python {sys.version.split()[0]}")
+    line(bool(shutil.which("fc-cache")), "fontconfig (fc-cache)")
+    line(True, f"fontTools: {toolchain.fonttools_source()}")
+    line(desktop.gsettings_available(), "gsettings (GNOME interface schema; optional)")
+    line(bool(toolchain.seven_zip()), "7-Zip (only for downloading SF from Apple)")
+    ctx = Context.detect()
+    line(ctx.shim, f"Chromium shim in {paths.P.runtime_dir} (install.sh)")
+    for app, active in chromium.wrapped_apps().items():
+        line(active, f"wrapper for {app}" + ("" if active else ": not active, run install.sh"))
+    for p in PACKAGES:
+        line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
+    line(not desktop.environment_pending(statefile.load()),
+         "/etc/environment FREETYPE_PROPERTIES matches the state")
+
+
 def cmd_preview(_args) -> None:
     from .preview import Preview
     error = Preview().show(statefile.load())
     if error:
         raise StateError(error)
-    print("preview window opened (it closes on its own only when you close it)")
+    print("preview window opened")
+
+
+def cmd_uninstall(args) -> None:
+    for path in uninstall(purge=args.purge):
+        print(f"removed {path}")
+    print("Restart apps to see the change.")
 
 
 def cmd_cache(_args) -> None:
@@ -120,7 +194,17 @@ def parser() -> argparse.ArgumentParser:
     pr.add_argument("name", nargs="?")
     pr.add_argument("--system", action="store_true", help="also write /etc/environment (sudo)")
     pr.set_defaults(func=cmd_preset)
+    f = sub.add_parser("fonts", help="list, install or remove font packages")
+    f.add_argument("action", nargs="?", choices=("install", "remove"))
+    f.add_argument("package", nargs="?")
+    f.add_argument("--from", dest="from_dir", metavar="DIR", help="import from a folder instead of downloading")
+    f.add_argument("--accept-license", action="store_true", help="accept the font's license (sf, windows)")
+    f.set_defaults(func=cmd_fonts)
+    sub.add_parser("doctor", help="check this system").set_defaults(func=cmd_doctor)
     sub.add_parser("preview", help="open the preview window once").set_defaults(func=cmd_preview)
+    u = sub.add_parser("uninstall", help="remove everything fontlab wrote (uninstall.sh also removes wrappers)")
+    u.add_argument("--purge", action="store_true", help="also delete font packages, presets, state and cache")
+    u.set_defaults(func=cmd_uninstall)
     sub.add_parser("clean-cache", help="delete cached darkened fonts").set_defaults(func=cmd_cache)
     return p
 
@@ -133,7 +217,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         args.func(args)
-    except (StateError, fonts.FontError, FileNotFoundError) as e:
+    except ERRORS as e:
         print(f"fontlab: {e}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        return 130
     return 0

@@ -1,21 +1,25 @@
-"""Font files: pick sources for the chosen weights, darken them if asked, install them.
+"""Installed fonts: pick package files for the chosen weights, darken them if asked,
+and install them.
 
-Each family is installed into its own directory under ~/.local/share/fonts/fontlab.
-A family directory is always replaced as a whole, so two settings can never leave a
-mix of files behind. Darkened builds are cached in ~/.cache/fontlab/builds.
+Each family is installed into its own folder under ~/.local/share/fonts/fontlab and
+replaced as a whole, so two settings can never leave a mix of files behind. Darkened
+builds are cached in ~/.cache/fontlab/builds. A family whose package is not
+installed has no folder, and hides no system fonts.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
 from .fsutil import link_or_copy, replace_dir
+from .packages import BY_ID, Manifest
 from .state import State
+from .toolchain import run_builder
 
 # macOS 10.13 darkening at strength 1 (per side, in em).
 DARKEN_X_EM = 0.0121
@@ -30,49 +34,44 @@ class FontError(RuntimeError):
 
 @dataclass(frozen=True)
 class Family:
-    name: str
+    package: str
     weight_key: str          # setting that picks the weight
     darkens: bool            # gets the `darkening` setting (TrueType outlines only)
-    replaces: tuple[str, ...] = ()   # system font globs hidden while this family is installed
-    system_base: bool = False        # weight 400 is the system font: install nothing
+    system_base: bool = False   # weight 400 is the system font itself: install nothing
 
 
 FAMILIES: tuple[Family, ...] = (
     Family("inter", "ui_weight", darkens=True),
-    Family("adwaita", "ui_weight", darkens=True,
-           replaces=("/usr/share/fonts/Adwaita/AdwaitaSans-Regular.ttf",
-                     "/usr/share/fonts/Adwaita/AdwaitaSans-Italic.ttf")),
-    Family("jbm", "mono_weight", darkens=False, system_base=True,
-           replaces=("/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
-                     "/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Italic.ttf")),
+    Family("adwaita", "ui_weight", darkens=True),
+    Family("jbm", "mono_weight", darkens=False, system_base=True),
     Family("sf", "sf_weight", darkens=False),
 )
 
 
 @dataclass(frozen=True)
 class FontSet:
-    """What one family directory should contain."""
+    """What one family folder should contain. No sources = no folder."""
     family: Family
     key: str                 # identifies the content; written to the marker file
     sources: tuple[Path, ...]
     darken: float
+    replaces: tuple[str, ...]
 
     @property
     def rejects(self) -> tuple[str, ...]:
-        return self.family.replaces if self.sources else ()
+        return self.replaces if self.sources else ()
 
 
-def source_files(family: Family, weight: str) -> list[Path]:
-    root = paths.P.sources / family.name
-    base_dir, weight_dir = root / "400", root / weight
-    base = [] if family.system_base else sorted(base_dir.glob("*.[ot]tf"))
-    if not family.system_base and not base:
-        raise FontError(f"no source fonts in {base_dir}. Run scripts/migrate_legacy.py first.")
+def source_files(family: Family, manifest: Manifest, weight: str) -> list[Path]:
+    root = paths.P.sources / family.package
+    if weight not in manifest.weights:
+        weight = "400"
+    base = [] if family.system_base else sorted((root / "400").glob("*.[ot]tf"))
     if weight == "400":
         return base
-    overrides = sorted(weight_dir.glob("*.[ot]tf"))
+    overrides = sorted((root / weight).glob("*.[ot]tf"))
     if not overrides:
-        raise FontError(f"no {family.name} fonts for weight {weight} in {weight_dir}")
+        raise FontError(f"{family.package}: no files for weight {weight} in {root / weight}")
     replaced = {f.stem for f in overrides}
     return [f for f in base if f.stem not in replaced] + overrides
 
@@ -80,27 +79,21 @@ def source_files(family: Family, weight: str) -> list[Path]:
 def plan(state: State) -> list[FontSet]:
     sets = []
     for family in FAMILIES:
+        manifest = BY_ID[family.package].manifest()
+        if manifest is None:
+            sets.append(FontSet(family, "", (), 0.0, ()))
+            continue
         weight = state[family.weight_key]
         darken = float(state["darkening"]) if family.darkens else 0.0
         key = weight if darken == 0 else f"{weight}-d{state['darkening']}"
-        sets.append(FontSet(family, key, tuple(source_files(family, weight)), darken))
+        key += "-" + hashlib.sha1(manifest.version.encode()).hexdigest()[:6]   # rebuild on reinstall
+        files = tuple(source_files(family, manifest, weight))
+        sets.append(FontSet(family, key, files, darken, tuple(manifest.replaces)))
     return sets
 
 
 def _build_dir(fs: FontSet) -> Path:
-    return paths.P.builds_dir / f"{fs.family.name}-{fs.key}"
-
-
-def _darken(jobs: list[tuple[Path, Path, float]]) -> None:
-    uv = shutil.which("uv")
-    if not uv:
-        raise FontError("uv not found in PATH; it runs the darkening builder with fontTools")
-    lines = "".join(f"{src}\t{dst}\t{DARKEN_X_EM * k}\t{DARKEN_Y_EM * k}\n" for src, dst, k in jobs)
-    builder = paths.PACKAGE_DIR / "fontbuild.py"
-    result = subprocess.run([uv, "run", "-q", "--with", "fonttools", "python", "-I", str(builder)],
-                            input=lines, text=True, capture_output=True)
-    if result.returncode != 0:
-        raise FontError(f"darkening build failed:\n{result.stderr.strip()}")
+    return paths.P.builds_dir / f"{fs.family.package}-{fs.key}"
 
 
 def realize(sets: list[FontSet]) -> dict[str, list[Path]]:
@@ -109,23 +102,24 @@ def realize(sets: list[FontSet]) -> dict[str, list[Path]]:
     pending: list[tuple[FontSet, Path]] = []
     for fs in sets:
         if fs.darken == 0:
-            final[fs.family.name] = list(fs.sources)
+            final[fs.family.package] = list(fs.sources)
             continue
         out = _build_dir(fs)
         if (out / MARKER).exists():
             os.utime(out)
         else:
             pending.append((fs, out))
-        final[fs.family.name] = [out / f.name for f in fs.sources]
+        final[fs.family.package] = [out / f.name for f in fs.sources]
 
     if pending:
-        jobs = []
+        jobs = ""
         for fs, out in pending:
             tmp = out.with_name(out.name + ".tmp")
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
-            jobs += [(src, tmp / src.name, fs.darken) for src in fs.sources]
-        _darken(jobs)
+            jobs += "".join(f"{src}\t{tmp / src.name}\t{DARKEN_X_EM * fs.darken}\t{DARKEN_Y_EM * fs.darken}\n"
+                            for src in fs.sources)
+        run_builder(["darken"], stdin=jobs)
         for fs, out in pending:
             tmp = out.with_name(out.name + ".tmp")
             (tmp / MARKER).write_text(fs.key + "\n")
@@ -143,7 +137,7 @@ def _prune_builds() -> None:
 
 
 def installed_key(family: Family) -> str | None:
-    marker = paths.P.installed_fonts / family.name / MARKER
+    marker = paths.P.installed_fonts / family.package / MARKER
     return marker.read_text().strip() if marker.exists() else None
 
 
@@ -157,14 +151,14 @@ def install(state: State) -> tuple[bool, list[FontSet]]:
     root = paths.P.installed_fonts
     root.mkdir(parents=True, exist_ok=True)
     for fs in todo:
-        target = root / fs.family.name
+        target = root / fs.family.package
         if not fs.sources:
             shutil.rmtree(target, ignore_errors=True)
             continue
-        stage = root / f".{fs.family.name}.stage"
+        stage = root / f".{fs.family.package}.stage"
         shutil.rmtree(stage, ignore_errors=True)
         stage.mkdir()
-        for f in files[fs.family.name]:
+        for f in files[fs.family.package]:
             link_or_copy(f, stage / f.name)
         (stage / MARKER).write_text(fs.key + "\n")
         replace_dir(stage, target)

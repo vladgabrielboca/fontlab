@@ -1,17 +1,19 @@
-"""Chromium-family apps (Chromium, Brave, Spotify, Discord).
+"""Chromium-family apps (browsers and Electron apps launched through fontlab's wrappers).
 
-Text contrast/gamma: Chromium does not forward --text-contrast/--text-gamma to
-renderers, so web pages get them from the LD_PRELOAD shim (chromium/text-shim.c),
-which reads chromium-text.conf. The browser UI gets them from the flags files.
+Text contrast/gamma: the wrappers in /usr/local/bin source chromium-env.sh, which reads
+chromium-text.conf. It passes --text-contrast/--text-gamma on the command line (browser
+UI) and preloads the shim, which adds them to renderer launches (web pages); Chromium
+does not forward these switches to renderers by itself.
 
-Windows fonts: a private fontconfig file that the launch wrappers export as
-FONTCONFIG_FILE. It is the system config minus the user's conf.d, plus the Windows
-web-font map and fontlab's own render settings.
+Windows fonts: a private fontconfig file that chromium-env.sh exports as FONTCONFIG_FILE.
+It is the system config minus the user's conf.d, plus the Windows web-font map and
+fontlab's own render settings.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from html import escape
 from pathlib import Path
@@ -20,20 +22,14 @@ from . import paths
 from .fsutil import remove, write_if_changed
 from .state import State
 
-FLAG_PREFIXES = ("--text-contrast=", "--text-gamma=")
+# Launchers that get a wrapper when present in /usr/bin.
+APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
+        "microsoft-edge-stable", "spotify", "discord")
+WRAPPER_MARK = "fontlab launch wrapper"
 
 
 def text_conf(state: State) -> str:
     return f"CONTRAST={state['contrast']}\nGAMMA={state['gamma']}\n"
-
-
-def set_flags(path: Path, state: State) -> bool:
-    """Replace only the text contrast/gamma lines; keep every other flag."""
-    if not path.exists():
-        return False
-    lines = [line for line in path.read_text().splitlines() if not line.startswith(FLAG_PREFIXES)]
-    lines += [f"--text-contrast={state['contrast']}", f"--text-gamma={state['gamma']}"]
-    return write_if_changed(path, "\n".join(lines) + "\n")
 
 
 def private_fonts_conf() -> str:
@@ -42,7 +38,7 @@ def private_fonts_conf() -> str:
     includes: list[Path] = []
     for f in sorted(paths.SYSTEM_FONTCONFIG_DIR.glob("*.conf")):
         if windows_map not in includes and f.name >= "45":
-            includes.append(windows_map)        # before 50-omarchy, like Chrome on Windows
+            includes.append(windows_map)        # before distro rules, like Chrome on Windows
         includes.append(p.render_conf if f.name == "50-user.conf" else f)
     if windows_map not in includes:
         includes.append(windows_map)
@@ -53,30 +49,34 @@ def private_fonts_conf() -> str:
             "  <dir>/usr/share/fonts</dir>\n"
             "  <dir>/usr/local/share/fonts</dir>\n"
             '  <dir prefix="xdg">fonts</dir>\n'
-            f"  <dir>{escape(str(p.ms_fonts))}</dir>\n"
+            f"  <dir>{escape(str(p.windows_fonts))}</dir>\n"
             "  <cachedir>/var/cache/fontconfig</cachedir>\n"
             '  <cachedir prefix="xdg">fontconfig</cachedir>\n'
             f"{body}</fontconfig>\n")
 
 
-def apply(state: State) -> tuple[bool, list[str]]:
-    """Returns (changed, notices)."""
-    p = paths.P
-    notices: list[str] = []
-    changed = write_if_changed(p.chromium_text_conf, text_conf(state))
-    for f in p.chromium_flags_files:
-        changed |= set_flags(f, state)
+def wrapped_apps() -> dict[str, bool]:
+    """Chromium-family launchers on this system -> whether fontlab's wrapper is active."""
+    out = {}
+    for app in APPS:
+        if not Path(f"/usr/bin/{app}").exists():
+            continue
+        wrapper = Path(f"/usr/local/bin/{app}")
+        active = (wrapper.exists() and WRAPPER_MARK in wrapper.read_text(errors="replace")
+                  and shutil.which(app) == str(wrapper))
+        out[app] = active
+    return out
 
+
+def apply(state: State) -> bool:
+    """Returns True when something changed."""
+    p = paths.P
+    changed = write_if_changed(p.chromium_text_conf, text_conf(state))
     if state["web_fonts"] == "windows":
-        if not p.ms_fonts.is_dir():
-            notices.append(f"web_fonts = windows, but {p.ms_fonts} is missing")
         if write_if_changed(p.chromium_fonts_conf, private_fonts_conf()):
             changed = True
             env = dict(os.environ, FONTCONFIG_FILE=str(p.chromium_fonts_conf))
-            subprocess.run(["fc-cache", str(p.ms_fonts)], env=env, check=False)
+            subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
     else:
         changed |= remove(p.chromium_fonts_conf)
-
-    if not (p.runtime_dir / "chromium-env.sh").exists():
-        notices.append("Chromium shim not installed, web pages ignore contrast/gamma. Run ./install.sh")
-    return changed, notices
+    return changed

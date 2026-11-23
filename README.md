@@ -1,12 +1,44 @@
 # fontlab
 
-Font rendering settings for this desktop (Omarchy, Hyprland, Chromium) in one place.
-Run `fontlab` for an interactive screen, or `fontlab set key=value` from scripts.
+Font rendering settings for Linux in one place: antialiasing, hinting, stem darkening,
+font weights, which font web pages get, and Chromium's text contrast and gamma.
+Change a value and it applies right away, with an optional Chromium preview window
+that restarts on every change.
 
-It replaces the old separate commands (`mac-darken`, `inter-weight`, `jbm-weight`,
-`sf-weight`, `sf-trial`, `chromium-text`, `chromium-ms-fonts`). Those each edited the
-same font files and configs, so the last one run won. fontlab keeps one state file and
-rebuilds every output from it.
+```
+  █▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄
+  █▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█   font rendering, one place
+
+  RENDERING
+  ▸ Antialiasing                grayscale ›
+    Hinting                   ‹ slight ›
+  ...
+  INSTALL FONTS
+    Inter                     ✓ installed  4.1
+    SF Pro (Apple)              not installed, enter installs
+```
+
+Built and tested on Omarchy (Arch, Hyprland). It only needs fontconfig and Python, so
+any distro and desktop should work. GNOME's gsettings are updated when the schema exists.
+
+## Install
+
+```
+git clone https://github.com/<you>/fontlab ~/.local/share/fontlab-src
+cd ~/.local/share/fontlab-src
+./install.sh
+fontlab
+```
+
+You need Python 3.11+ and fontconfig. Optional extras:
+
+- A C compiler (`gcc`) builds the small library that passes contrast and gamma to Chromium. Without it those two settings are greyed out.
+- `uv` or a system `python-fonttools` builds the font weights. Without either, fontlab makes a private venv the first time it needs one.
+- `7z` (p7zip or 7zip) downloads SF Pro straight from Apple. Without it you can still import SF fonts from a folder.
+
+`install.sh` asks for sudo once, to put launch wrappers for the Chromium-family apps it
+finds (chromium, brave, chrome, vivaldi, edge, spotify, discord) in `/usr/local/bin`.
+Run `./install.sh --no-wrappers` to skip that. Run it again after a `git pull`.
 
 ## Use
 
@@ -15,84 +47,84 @@ fontlab                          interactive screen
 fontlab status                   every setting, and which differ from the default
 fontlab list                     every setting's choices
 fontlab set gamma=1.4 darkening=0.5
+fontlab fonts                    font packages and whether they are installed
+fontlab fonts install inter
+fontlab fonts install sf --accept-license
+fontlab fonts install windows --from /run/media/me/Windows/Windows/Fonts --accept-license
+fontlab fonts remove sf
 fontlab preset save NAME | load NAME | list | delete NAME
-fontlab apply [--system]         make the system match state.toml (--system: sudo for /etc/environment)
+fontlab apply [--system]         make the system match the saved state
 fontlab preview                  open the preview window once
-fontlab clean-cache              delete cached darkened fonts
+fontlab doctor                   check what is installed and working
 ```
 
-Keys on the screen: up/down move, left/right change, Enter opens a list of choices,
-`r` resets to the default, `p` toggles the preview window, `s` saves a preset,
-`o` opens a preset, `!` writes `/etc/environment` with sudo, `q` quits.
+Keys on the screen: up/down move, left/right change a value, Enter opens the list of
+choices or installs a font, `r` resets to the default, `x` removes a font, `p` toggles
+the preview window, `s` saves a preset, `o` opens one, `!` writes `/etc/environment`
+with sudo, `q` quits.
 
-The preview window is Chromium with its own profile and a test page (text on black,
-dark grey, white and light grey). It restarts after every change, because Chromium
-reads these settings only at launch. Other apps need a restart too; terminal fonts
-need a new terminal window. The FreeType setting needs a new login.
+Most apps read font settings only at launch, so restart them to see a change. Terminal
+fonts need a new terminal window. The FreeType setting needs a new login.
 
 ## Settings
 
-| key | what it changes | where |
-|---|---|---|
-| antialias | grayscale or subpixel rgb/bgr | fontconfig, gsettings |
-| hinting, mono_hinting | none/slight/medium/full, proportional and monospace | fontconfig, gsettings |
-| lcdfilter | FreeType subpixel filter (Chromium ignores it) | fontconfig |
-| darkening | macOS-style stem darkening baked into Inter and Adwaita Sans, 0 to 1 | font files |
-| ui_weight | Inter and Adwaita Sans Regular/Italic weight | font files |
-| mono_weight | JetBrains Mono Regular/Italic weight | font files |
-| sf_weight | SF Pro Text Regular/Italic weight | font files |
-| web_fonts | inter, sf, or windows (Chromium only, others keep Inter) | fontconfig |
-| contrast, gamma | Skia text contrast and gamma | Chromium shim + flags |
-| freetype_darkening | FREETYPE_PROPERTIES: off, cff, all | /etc/environment |
+| key | what it changes |
+|---|---|
+| antialias | grayscale, or subpixel rgb/bgr |
+| hinting, mono_hinting | none/slight/medium/full, for proportional and monospace text |
+| lcdfilter | FreeType's subpixel filter (Chromium ignores it) |
+| darkening | macOS-style stem darkening baked into Inter and Adwaita Sans, 0 to 1 |
+| ui_weight | Inter and Adwaita Sans Regular/Italic weight, 400 to 500 |
+| mono_weight | JetBrains Mono Regular/Italic weight |
+| sf_weight | SF Pro Text Regular/Italic weight |
+| web_fonts | what `sans-serif`, `system-ui`, Arial, Helvetica and friends become: default, inter, sf, or windows (Chromium only) |
+| contrast, gamma | Skia's text contrast and gamma in Chromium apps |
+| freetype_darkening | FREETYPE_PROPERTIES in `/etc/environment`. `keep` (the default) never touches the file |
 
-## Layout
+A setting that needs a font you don't have is greyed out and says which one.
 
-```
-fontlab/settings.py     the settings: key, choices, default, help
-fontlab/state.py        state.toml and presets
-fontlab/apply.py        runs every step below; each writes only when its output changes
-fontlab/fonts.py        pick source files per weight, darken (cached), install per family
-fontlab/fontbuild.py    the darkening itself; runs under `uv run --with fonttools`
-fontlab/fontconfig.py   70-fontlab-render.conf and 71-fontlab-web.conf
-fontlab/chromium.py     shim config, flags files, private fontconfig for Windows fonts
-fontlab/desktop.py      gsettings and /etc/environment
-fontlab/preview.py      the preview window
-fontlab/tui.py          the interactive screen
-fontlab/cli.py          the command line
-chromium/               LD_PRELOAD shim source, chromium-env.sh, wrapper template
-scripts/migrate_legacy.py   one-time move from the old commands
-```
+## Fonts
 
-## Files
+fontlab never ships font files. It builds or imports them on your machine into
+`~/.local/share/fontlab/sources`.
 
-Inputs (read-only):
-- `~/.local/share/fontlab/sources/<family>/400/`: the full stock family.
-- `~/.local/share/fontlab/sources/<family>/<weight>/`: only the faces that change at that weight.
-- `~/.local/share/ms-fonts/`: Windows 11 fonts, used only by Chromium.
+| package | where it comes from |
+|---|---|
+| inter | Inter 4.1 release from github.com/rsms/inter (checksum verified), heavier weights built from the variable font |
+| adwaita | your installed Adwaita Sans, rebuilt as static files with heavier weights |
+| jbm | JetBrains Mono 2.304 outlines at each weight, put on your installed JetBrains Mono or its Nerd Font so the icons stay |
+| sf | SF Pro, SF Mono and New York, downloaded from Apple or imported from a folder. Apple's license allows use only on Apple platforms, so you have to accept that yourself |
+| windows | Windows 11 fonts copied from a Windows install's Fonts folder (fontlab looks in `/run/media`, `/media` and `/mnt`). Used only by Chromium apps. You need a Windows license |
 
-State: `~/.config/fontlab/state.toml` and `~/.config/fontlab/presets/`.
+Installs are atomic: a failed or cancelled install leaves the old package as it was.
 
-Outputs (owned by fontlab, rewritten from state):
-- `~/.local/share/fonts/fontlab/<family>/`: each family folder is replaced as a whole.
-- `~/.config/fontconfig/conf.d/70-fontlab-render.conf` and `71-fontlab-web.conf`.
-- `~/.config/fontlab/chromium-text.conf` (shim) and `chromium-fonts.conf` (windows only).
-- gsettings `org.gnome.desktop.interface` font-antialiasing, font-rgba-order, font-hinting.
+## How it works
 
-Shared files, where fontlab edits only its own lines:
-- `~/.config/chromium-flags.conf` and `~/.config/brave-origin-flags.conf`: `--text-contrast`, `--text-gamma`.
-- `/etc/environment`: `FREETYPE_PROPERTIES`.
+Everything comes from one file, `~/.config/fontlab/state.toml`. Each apply rebuilds the
+outputs from it and only writes files whose content changed:
 
-Cache: `~/.cache/fontlab/builds` (the 16 most recent darkened builds), `~/.cache/fontlab/preview`.
+- `~/.local/share/fonts/fontlab/` holds the chosen weight of each family, plus darkened copies (cached in `~/.cache/fontlab`). The system copies of those families are hidden with fontconfig `rejectfont`, so nothing in `/usr/share` is modified.
+- `~/.config/fontconfig/conf.d/70-fontlab-render.conf` and `71-fontlab-web.conf` hold the rendering and font-substitution rules. If your distro forces `sans-serif` to a font (Omarchy uses Liberation Sans), fontlab detects that and overrides it.
+- The `/usr/local/bin` wrappers start the real browser with `--text-contrast` and `--text-gamma` and preload a small library that adds the same flags to the renderer processes, because Chromium's zygote drops them otherwise. With `web_fonts=windows` they also point Chromium at a private fontconfig file that adds the Windows fonts.
+- gsettings `font-antialiasing`, `font-rgba-order` and `font-hinting`, when the GNOME schema exists.
 
-## Install
+## Uninstall
 
 ```
-python3 scripts/migrate_legacy.py --dry-run   # once, from the old commands
-python3 scripts/migrate_legacy.py
-./install.sh                                  # shim, ~/.local/bin/fontlab, wrappers (sudo)
-fontlab apply
+./uninstall.sh            remove outputs and wrappers, keep fonts and presets
+./uninstall.sh --purge    also delete font packages, presets, state and cache
 ```
 
-Tests: `python3 -m unittest discover -s tests -t .`
+`/etc/environment` is left as it is.
 
-SF and Windows fonts are proprietary. They stay in `~/.local/share` and never go in this repo.
+## Tests
+
+```
+python3 -m unittest discover tests
+```
+
+## Credits
+
+The darkening code is a Python port of FreeType's `FT_Outline_EmboldenXY`, with the
+macOS strength measured by the Pathfinder project. Inter is by Rasmus Andersson,
+JetBrains Mono by JetBrains, both under the SIL Open Font License.

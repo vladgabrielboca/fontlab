@@ -1,12 +1,14 @@
 """Desktop-wide settings outside fontconfig.
 
-gsettings: GTK and the Chromium UI read antialiasing and hinting from here.
+gsettings: GTK and the Chromium UI read antialiasing and hinting from here (GNOME schema;
+skipped where it is not installed).
 /etc/environment: FREETYPE_PROPERTIES for FreeType apps. Root-owned and read at
 login, so changing it needs sudo and a new login.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 
@@ -14,7 +16,7 @@ from . import paths
 from .state import State
 
 SCHEMA = "org.gnome.desktop.interface"
-FREETYPE = {
+FREETYPE = {      # "keep" is not here: fontlab then never touches /etc/environment
     "off": None,
     "cff": "cff:no-stem-darkening=0",
     "all": "cff:no-stem-darkening=0 autofitter:no-stem-darkening=0",
@@ -30,7 +32,17 @@ def gsettings_values(state: State) -> dict[str, str]:
     return values
 
 
+def gsettings_available() -> bool:
+    if not shutil.which("gsettings"):
+        return False
+    r = subprocess.run(["gsettings", "list-keys", SCHEMA], capture_output=True, text=True)
+    return r.returncode == 0 and "font-hinting" in r.stdout
+
+
 def apply_gsettings(state: State) -> bool:
+    """No-op on systems without GNOME's interface schema."""
+    if not gsettings_available():
+        return False
     changed = False
     for key, value in gsettings_values(state).items():
         current = subprocess.run(["gsettings", "get", SCHEMA, key],
@@ -41,18 +53,52 @@ def apply_gsettings(state: State) -> bool:
     return changed
 
 
-def environment_text(current: str, state: State) -> str:
-    """/etc/environment with only the FREETYPE_PROPERTIES line replaced."""
-    lines = [l for l in current.splitlines() if not l.startswith("FREETYPE_PROPERTIES=")]
-    value = FREETYPE[state["freetype_darkening"]]
+def reset_gsettings() -> None:
+    if gsettings_available():
+        for key in ("font-antialiasing", "font-rgba-order", "font-hinting"):
+            subprocess.run(["gsettings", "reset", SCHEMA, key], check=False)
+
+
+OWN_PROPERTIES = ("cff:no-stem-darkening=", "autofitter:no-stem-darkening=")
+
+
+def merged_freetype(current: str | None, state: State) -> str | None:
+    """FREETYPE_PROPERTIES with fontlab's two properties set and every other one kept."""
+    tokens = [t for t in (current or "").split() if not t.startswith(OWN_PROPERTIES)]
+    tokens += (FREETYPE[state["freetype_darkening"]] or "").split()
+    return " ".join(tokens) or None
+
+
+def current_freetype() -> str | None:
+    """The FREETYPE_PROPERTIES value in /etc/environment, without quotes."""
+    if not paths.ENVIRONMENT_FILE.exists():
+        return None
+    for line in paths.ENVIRONMENT_FILE.read_text().splitlines():
+        if line.startswith("FREETYPE_PROPERTIES="):
+            return line.split("=", 1)[1].strip().strip('"\'')
+    return None
+
+
+def environment_text(current_text: str, state: State) -> str:
+    """/etc/environment with only the FREETYPE_PROPERTIES line updated."""
+    lines, old = [], None
+    for line in current_text.splitlines():
+        if line.startswith("FREETYPE_PROPERTIES="):
+            old = line.split("=", 1)[1].strip().strip('"\'')
+        else:
+            lines.append(line)
+    value = merged_freetype(old, state)
     if value:
         lines.append(f'FREETYPE_PROPERTIES="{value}"')
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n" if lines else ""
 
 
 def environment_pending(state: State) -> bool:
-    current = paths.ENVIRONMENT_FILE.read_text() if paths.ENVIRONMENT_FILE.exists() else ""
-    return environment_text(current, state) != current
+    if state["freetype_darkening"] == "keep":
+        return False
+    current = current_freetype()
+    normalized = " ".join(current.split()) if current else None
+    return merged_freetype(current, state) != normalized
 
 
 def apply_environment(state: State, interactive: bool) -> bool:

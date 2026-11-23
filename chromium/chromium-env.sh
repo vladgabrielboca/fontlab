@@ -1,9 +1,16 @@
-# Sourced (POSIX sh) by the /usr/local/bin Chromium-family wrappers.
-# Installed to ~/.local/share/fontlab/runtime by fontlab's install.sh.
+# Sourced (POSIX sh) by fontlab's launch wrappers in /usr/local/bin.
+# Installed to ~/.local/share/fontlab/runtime by install.sh. Sets FONTLAB_ARGS.
 R="$HOME/.local/share/fontlab/runtime"
 C="$HOME/.config/fontlab"
-# Text contrast/gamma for web pages (fontlab writes chromium-text.conf).
-[ -f "$R/fontlab-text-shim.so" ] && [ -f "$C/chromium-text.conf" ] && \
-  export LD_PRELOAD="$R/fontlab-text-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
-# Windows fonts, Chromium only (fontlab writes chromium-fonts.conf when web_fonts = windows).
+FONTLAB_ARGS=
+# Text contrast/gamma: flags for the browser UI, shim for web pages (renderers).
+if [ -f "$C/chromium-text.conf" ]; then
+  CONTRAST=; GAMMA=
+  . "$C/chromium-text.conf"
+  if [ -n "$CONTRAST" ] && [ -n "$GAMMA" ]; then
+    FONTLAB_ARGS="--text-contrast=$CONTRAST --text-gamma=$GAMMA"
+    [ -f "$R/fontlab-text-shim.so" ] && export LD_PRELOAD="$R/fontlab-text-shim.so${LD_PRELOAD:+:$LD_PRELOAD}"
+  fi
+fi
+# Windows fonts, Chromium-family apps only (written when web_fonts = windows).
 [ -f "$C/chromium-fonts.conf" ] && export FONTCONFIG_FILE="$C/chromium-fonts.conf"

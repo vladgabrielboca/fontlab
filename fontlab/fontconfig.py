@@ -1,12 +1,14 @@
 """fontconfig files fontlab generates.
 
 70-fontlab-render.conf  antialiasing, hinting, LCD filter, hidden system fonts
-71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to
+71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to (absent for "default")
 """
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from collections.abc import Iterable
+from html import escape
 
 from . import paths
 from .state import State
@@ -18,6 +20,30 @@ HEADER = """<?xml version="1.0"?>
 
 RGBA = {"grayscale": "none", "rgb": "rgb", "bgr": "bgr"}
 LCDFILTER = {"default": "lcddefault", "light": "lcdlight", "legacy": "lcdlegacy", "none": "lcdnone"}
+
+SANS_NAMES = ("sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Roboto", "Arial",
+              "Helvetica", "Helvetica Neue", "Segoe UI")
+SF_EXTRA_NAMES = ("SF Pro", ".SF NS", "SF UI Text")
+
+# macOS details for the SF mapping: Display at 20pt+, SF Mono and New York for their
+# generic names, and New York Small's odd Bold/Black weights fixed so bold picks Bold.
+SF_RULES = """  <match target="pattern">
+    <test name="family" qual="first"><string>SF Pro Text</string></test>
+    <test name="size" compare="more_eq"><double>20</double></test>
+    <edit name="family" mode="prepend" binding="strong"><string>SF Pro Display</string></edit>
+  </match>
+""" + "".join(f"""  <match target="pattern">
+    <test name="family" qual="any"><string>{name}</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>{target}</string></edit>
+  </match>
+""" for name, target in (("ui-monospace", "SF Mono"), ("SFMono-Regular", "SF Mono"), ("Menlo", "SF Mono"),
+                         ("Monaco", "SF Mono"), ("ui-serif", "New York Small"), ("New York", "New York Small"),
+                         ("ui-rounded", "SF Pro Rounded"))) + "".join(f"""  <match target="scan">
+    <test name="family"><string>New York Small</string></test>
+    <test name="style"><string>{style}</string></test>
+    <edit name="weight" mode="assign"><int>{weight}</int></edit>
+  </match>
+""" for style, weight in (("Bold", 200), ("Bold Italic", 200), ("Black", 210), ("Black Italic", 210)))
 
 
 def _hint_edits(style: str, indent: str) -> str:
@@ -42,12 +68,51 @@ def render_conf(state: State, rejects: Iterable[str]) -> str:
     if rejects:
         out += "  <!-- System files replaced by fontlab's copies in ~/.local/share/fonts/fontlab. -->\n"
         out += "  <selectfont><rejectfont>\n"
-        out += "".join(f"    <glob>{g}</glob>\n" for g in rejects)
+        out += "".join(f"    <glob>{escape(g)}</glob>\n" for g in rejects)
         out += "  </rejectfont></selectfont>\n"
     return out + "</fontconfig>\n"
 
 
-def web_conf(state: State) -> str:
-    # windows applies to Chromium only (see chromium.py); every other app keeps Inter.
-    name = "sf" if state["web_fonts"] == "sf" else "inter"
-    return (paths.DATA_DIR / f"web-{name}.conf").read_text()
+def system_sans_rewrites() -> list[str]:
+    """Families the system config ASSIGNS in place of sans-serif/system-ui.
+
+    Some distros (Omarchy's 50-omarchy.conf) replace the generic name before user rules
+    run, so a rule on "sans-serif" never fires. Matching on what it became fixes that."""
+    found: list[str] = []
+    for f in sorted(paths.SYSTEM_FONTCONFIG_DIR.glob("*.conf")):
+        try:
+            root = ET.parse(f).getroot()
+        except (ET.ParseError, OSError):
+            continue
+        for match in root.iter("match"):
+            tests = {s.text for t in match.findall("test") if t.get("name") == "family" for s in t.iter("string")}
+            if not tests & {"sans-serif", "system-ui"}:
+                continue
+            for edit in match.findall("edit"):
+                if edit.get("name") == "family" and edit.get("mode", "").startswith("assign"):
+                    found += [s.text for s in edit.iter("string") if s.text and s.text not in found]
+    return found
+
+
+def _aliases(names: Iterable[str], target: str) -> str:
+    return "".join(f"""  <match target="pattern">
+    <test name="family" qual="any"><string>{escape(n)}</string></test>
+    <edit name="family" mode="prepend" binding="strong"><string>{escape(target)}</string></edit>
+  </match>
+""" for n in names)
+
+
+def web_conf(state: State, inter_available: bool) -> str | None:
+    """None means no file: the system decides."""
+    choice = state["web_fonts"]
+    if choice == "windows":            # Chromium gets Windows fonts (chromium.py); others keep Inter
+        choice = "inter" if inter_available else "default"
+    if choice == "default":
+        return None
+    rewrites = system_sans_rewrites()
+    if choice == "inter":
+        body = _aliases([*SANS_NAMES, *rewrites], "Inter")
+    else:
+        body = _aliases([*SANS_NAMES, *SF_EXTRA_NAMES, *rewrites], "SF Pro Text") + SF_RULES
+    note = ("  <!-- prepend+strong keeps the rest of the list, so CJK, emoji and icons still fall back. -->\n")
+    return HEADER + "<fontconfig>\n" + note + body + "</fontconfig>\n"

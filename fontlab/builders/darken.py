@@ -1,19 +1,12 @@
-"""Bake macOS-style stem darkening into TrueType fonts.
+"""macOS-style stem darkening baked into TrueType outlines.
 
-Runs in its own interpreter with fontTools (via `uv run --with fonttools`), so it must
-not import anything from fontlab. Input on stdin, one tab-separated job per line:
-
-    SRC  DST  XEM  YEM
-
-Every outline edge moves outward by XEM (horizontal) and YEM (vertical) em per side.
+Every outline edge moves outward by xem (horizontal) and yem (vertical) em per side.
 Advances stay the same, like macOS. The point shifting is FreeType's
 FT_Outline_EmboldenXY algorithm. macOS 10.13 factors (reverse-engineered by Pathfinder):
 0.0121 em horizontal, 0.0121 * 1.25 em vertical, exact below ~25 px.
 """
 
 import math
-import sys
-from concurrent.futures import ProcessPoolExecutor
 
 from fontTools.ttLib import TTFont
 
@@ -87,14 +80,3 @@ def darken(src, dst, xem, yem):
     font.save(dst)
     return dst
 
-
-def main():
-    jobs = [line.rstrip("\n").split("\t") for line in sys.stdin if line.strip()]
-    with ProcessPoolExecutor() as pool:
-        futures = [pool.submit(darken, src, dst, float(x), float(y)) for src, dst, x, y in jobs]
-        for f in futures:
-            f.result()
-
-
-if __name__ == "__main__":
-    main()
