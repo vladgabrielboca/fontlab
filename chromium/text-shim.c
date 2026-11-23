@@ -1,8 +1,8 @@
 // LD_PRELOAD shim for Chromium-based apps (browsers, Electron, CEF): add --text-contrast/--text-gamma to renderer
 // fork requests sent from the browser process to the zygote. Chromium does not
 // forward these Skia switches to renderers. Renderers stay zygote-forked and sandboxed.
-// Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab.
-// Missing file = no change.
+// Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab,
+// or the file in $FONTLAB_TEXT_CONF (the preset comparison window). Missing file = no change.
 // Fork message (base::Pickle): u32 payload_size | i32 cmd | str process_type | i32 argc | argc x str | rest
 // str = i32 len + bytes, padded to 4.
 #define _GNU_SOURCE
@@ -20,10 +20,12 @@ static int have_extra = -1;
 
 static void load_conf(void) {
   have_extra = 0;
-  const char *home = getenv("HOME");
-  if (!home) return;
   char path[512], line[128], c[32] = "", g[32] = "";
-  snprintf(path, sizeof path, "%s/.config/fontlab/chromium-text.conf", home);
+  const char *own = getenv("FONTLAB_TEXT_CONF");
+  const char *home = getenv("HOME");
+  if (own && *own) snprintf(path, sizeof path, "%s", own);
+  else if (home) snprintf(path, sizeof path, "%s/.config/fontlab/chromium-text.conf", home);
+  else return;
   FILE *f = fopen(path, "r");
   if (!f) return;
   while (fgets(line, sizeof line, f)) {

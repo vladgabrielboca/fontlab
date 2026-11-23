@@ -23,6 +23,7 @@ EPILOG = """examples:
   fontlab fonts install windows --from /run/media/me/Windows/Windows/Fonts
   fontlab set gamma=1.4 hinting=slight
   fontlab preset save mac-half
+  fontlab preview --compare mac-half   live settings and a saved preset side by side
   fontlab apps                     Chromium and Electron apps that get contrast and gamma
   fontlab doctor                   check this system
 """
@@ -152,7 +153,8 @@ def cmd_apps(args) -> None:
     found = [a for a in apps.scan() if a.reason]
     for a in sorted(found, key=lambda a: a.entry.name.lower()):
         mark = "-" if a.skipped else "✓" if active else " "
-        print(f" {mark} {a.entry.name:<28} {a.entry.id:<36} {a.reason}")
+        how = ", through its /usr/local/bin wrapper" if a.via_wrapper else ""
+        print(f" {mark} {a.entry.name:<28} {a.entry.id:<36} {a.reason}{how}")
     if not found:
         print("no Chromium or Electron apps found")
     if not active:
@@ -184,12 +186,14 @@ def cmd_doctor(_args) -> None:
          "/etc/environment FREETYPE_PROPERTIES matches the state")
 
 
-def cmd_preview(_args) -> None:
+def cmd_preview(args) -> None:
     from .preview import Preview
     error = Preview().show(statefile.load())
+    if not error and args.compare:
+        error = Preview("compare").compare(statefile.load_preset(args.compare), f"saved preset '{args.compare}'")
     if error:
         raise StateError(error)
-    print("preview window opened")
+    print("preview windows opened" if args.compare else "preview window opened")
 
 
 def cmd_uninstall(args) -> None:
@@ -234,7 +238,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("name", nargs="?", help="desktop file name, app name or program")
     ap.set_defaults(func=cmd_apps)
     sub.add_parser("doctor", help="check this system").set_defaults(func=cmd_doctor)
-    sub.add_parser("preview", help="open the preview window once").set_defaults(func=cmd_preview)
+    pv = sub.add_parser("preview", help="open the preview window once")
+    pv.add_argument("--compare", metavar="PRESET", help="also open a window with this saved preset")
+    pv.set_defaults(func=cmd_preview)
     u = sub.add_parser("uninstall", help="remove everything fontlab wrote (uninstall.sh also removes wrappers)")
     u.add_argument("--purge", action="store_true", help="also delete font packages, presets, state and cache")
     u.set_defaults(func=cmd_uninstall)

@@ -44,6 +44,7 @@ On the screen:
 | r | reset to the default |
 | x | remove a font |
 | p | open a Chromium preview window that reloads on every change |
+| c | open a second window with a saved preset next to it, to compare (c again closes it) |
 | s / o | save or open a preset |
 | ! | apply the setting that needs sudo |
 | q | quit |

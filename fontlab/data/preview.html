@@ -2,12 +2,13 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>fontlab preview</title>
+<title>fontlab: {{LABEL}}</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: sans-serif; background: #000; }
   header { padding: 10px 16px; font: 13px monospace; color: #9a9a9a; background: #000;
            border-bottom: 1px solid #222; white-space: pre-wrap; }
+  header b { color: #e6e6e6; }
   .panels { display: grid; grid-template-columns: repeat(2, 1fr); }
   section { padding: 16px 20px 20px; }
   .black { background: #000; color: #e6e6e6; }
@@ -25,7 +26,7 @@
 </style>
 </head>
 <body>
-<header>{{SETTINGS}}</header>
+<header><b>{{LABEL}}</b>   {{SETTINGS}}</header>
 <div class="panels">
   {{PANELS}}
 </div>

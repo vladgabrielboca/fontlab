@@ -3,7 +3,8 @@ font packages below them.
 
 Changes are saved to state.toml at once. A background worker applies them after a
 short pause (so holding an arrow key does not rebuild fonts for every step), restarts
-the preview window if it is on, and runs package installs one at a time.
+the preview window if it is on, and runs package installs one at a time. A second
+window can show a saved preset next to it for comparison (c).
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from .toolchain import seven_zip
 
 LOGO = ("█▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄",
         "█▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█")
-KEYS = "↑↓ move  ←→ change  enter pick/install  r default  x remove  p preview  s save  o open  ! sudo  q quit"
+KEYS = "↑↓ move  ←→ change  enter pick/install  r default  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
 FONTS_GROUP = "Install fonts"
 DEBOUNCE = 0.35
 LABEL_W = 26
@@ -126,6 +127,8 @@ class Screen:
         self.top = 0
         self.message = ""
         self.preview = Preview()
+        self.compare = Preview("compare")     # a saved preset, not applied
+        self.compare_name = ""
         self.worker = Worker(self.preview)
         self.worker.start()
 
@@ -214,7 +217,11 @@ class Screen:
             self.put(y + 1, 2, wk.error, self.ERR)
         else:
             self.put(y + 1, 2, ("◌ " if wk.busy else "● ") + wk.status, self.WARN if wk.busy else self.OK)
+        if wk.preview_on and not wk.busy and not self.preview.running:
+            wk.preview_on = False             # the window was closed by hand
         preview = "preview: on" if wk.preview_on else "preview: off"
+        if self.compare.running:
+            preview += f", vs {self.compare_name}"
         self.put(y + 1, max(2, w - len(preview) - 2), preview, self.ACCENT if wk.preview_on else curses.A_DIM)
         for j, notice in enumerate(wk.notices[:2]):
             self.put(y + 2 + j, 2, "! " + notice, self.WARN)
@@ -425,6 +432,28 @@ class Screen:
         else:
             self.preview.stop()
 
+    def toggle_compare(self) -> None:
+        """Open a second window with a saved preset, or close it."""
+        if self.compare.running:
+            self.compare.stop()
+            self.message = f"closed '{self.compare_name}'"
+            return
+        names = statefile.list_presets()
+        name = self.pick("compare with preset", names)
+        if not name:
+            self.message = "" if names else "no presets yet (s saves one)"
+            return
+        if not self.worker.preview_on:
+            self.toggle_preview()
+
+        def job(_progress: Callable[[str], None]) -> None:
+            self.compare_name = name
+            error = self.compare.compare(statefile.load_preset(name), f"saved preset '{name}'")
+            if error:
+                raise RuntimeError(error)
+
+        self.worker.task(f"opening preset '{name}' for comparison", job)
+
     def sudo_apply(self) -> None:
         if not desktop.environment_pending(self.state):
             self.message = "/etc/environment already matches"
@@ -468,6 +497,8 @@ class Screen:
             self.remove(r)
         elif k == ord("p"):
             self.toggle_preview()
+        elif k == ord("c"):
+            self.toggle_compare()
         elif k == ord("s"):
             self.save_preset()
         elif k == ord("o"):
@@ -498,6 +529,7 @@ class Screen:
                     break
         finally:
             self.preview.stop()
+            self.compare.stop()
 
 
 def main() -> None:

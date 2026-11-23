@@ -4,7 +4,8 @@ Text contrast and gamma only reach a Chromium-based app when fontlab's shim is
 preloaded into it. Two routes cover the ways apps get started:
 
 - From a terminal: the /usr/local/bin wrappers (chromium.APPS, installed by install.sh).
-- From the app launcher: the app's desktop entry. fontlab writes a copy into
+- From the app launcher: the app's desktop entry, unless its Exec already reaches a
+  /usr/local/bin wrapper through PATH. fontlab writes a copy into
   ~/.local/share/applications with every Exec line prefixed by fontlab-launch. A copy
   there hides the system entry with the same name. Entries that already live in
   ~/.local/share/applications are edited in place and the original is kept in
@@ -76,6 +77,15 @@ class App:
     @property
     def wrapped(self) -> bool:
         return bool(self.reason) and not self.skipped
+
+    @property
+    def via_wrapper(self) -> bool:
+        """Exec names a program that PATH finds as fontlab's /usr/local/bin wrapper, which
+        adds the settings by itself. Its entry is left alone: tools that read the Exec
+        line (omarchy-launch-browser takes its first word as the browser) must still see
+        the browser there, not fontlab-launch."""
+        prog = self.entry.program
+        return bool(prog) and "/" not in prog and is_fontlab_wrapper(Path(shutil.which(prog) or "/"))
 
 
 # --- desktop entries --------------------------------------------------------------
@@ -343,7 +353,7 @@ def apply(enabled: bool) -> bool:
     backups: dict[str, str] = {}
     if enabled and p.launcher.exists():
         for app in scan():
-            if not app.wrapped:
+            if not app.wrapped or app.via_wrapper:
                 continue
             e = app.entry
             if e.user:

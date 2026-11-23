@@ -214,6 +214,47 @@ class ChromiumTest(TempHome):
         self.assertIn(str(paths.P.windows_fonts), xml)
 
 
+class CompareTest(TempHome):
+    def test_preset_window_uses_its_own_files(self) -> None:
+        from unittest import mock
+        from fontlab import preview
+        self.fake_package("inter", {"400": ["Inter-Regular.ttf", "Inter-Bold.ttf"],
+                                    "450": ["Inter-Regular.ttf"]},
+                          replaces=["/usr/share/fonts/inter/Inter.ttc"])
+        for f in ("chromium-env.sh", "fontlab-text-shim.so"):
+            self.fake_font(paths.P.runtime_dir / f)
+        self.fake_font(paths.P.fontconfig_dir / "10-mine.conf")
+        self.fake_font(paths.P.web_conf)
+        st = dict(DEFAULTS, ui_weight="450", web_fonts="inter", contrast="0.5")
+        with mock.patch.object(preview.subprocess, "run"):
+            env, args = preview.compare_setup(st)
+        d = paths.P.preview_dir / "compare"
+        linked = sorted(f.name for f in (d / "fonts/inter").iterdir())
+        self.assertEqual(linked, ["Inter-Bold.ttf", "Inter-Regular.ttf"])
+        self.assertIn("450", (d / "fonts/inter/Inter-Regular.ttf").resolve().parent.name)
+        conf = (d / "fonts.conf").read_text()
+        self.assertIn(f"<glob>{paths.P.installed_fonts}/*</glob>", conf)
+        self.assertIn(f"<dir>{d / 'fonts'}</dir>", conf)
+        self.assertIn(str(d / "web.conf"), conf)
+        self.assertNotIn(str(paths.P.render_conf), conf)
+        self.assertNotIn(str(paths.P.web_conf), conf)
+        self.assertIn(str(paths.P.fontconfig_dir / "10-mine.conf"), conf)
+        self.assertNotIn("web-windows.conf", conf)
+        self.assertEqual(env["FONTCONFIG_FILE"], str(d / "fonts.conf"))
+        self.assertIn("CONTRAST=0.5", Path(env["FONTLAB_TEXT_CONF"]).read_text())
+        self.assertEqual(args, ["--text-contrast=0.5", "--text-gamma=1.2"])
+
+    def test_default_text_values_skip_the_shim(self) -> None:
+        from unittest import mock
+        from fontlab import preview
+        with mock.patch.object(preview.subprocess, "run"), \
+                mock.patch.dict(os.environ, {"LD_PRELOAD": "x.so", "FONTLAB_TEXT_CONF": "y"}):
+            env, args = preview.compare_setup(dict(DEFAULTS))
+        self.assertNotIn("LD_PRELOAD", env)
+        self.assertNotIn("FONTLAB_TEXT_CONF", env)
+        self.assertEqual(args, [])
+
+
 class ChromiumDefaultsTest(TempHome):
     def test_chromium_values_add_nothing(self) -> None:
         self.assertIsNone(chromium.text_conf(dict(DEFAULTS)))
@@ -272,6 +313,19 @@ class AppsTest(TempHome):
         self.assertFalse((paths.P.applications_dir / "electronapp.desktop").exists())
         self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), self.user_entry)
         self.assertFalse((paths.P.desktop_backup / "mine.desktop").exists())
+
+    def test_entry_reaching_a_wrapper_is_left_alone(self) -> None:
+        from unittest import mock
+        self.desktop(self.system / "applications/browser.desktop", "browser %U")
+        wrapper = "/usr/local/bin/browser"
+        with mock.patch.object(apps, "resolve", lambda prog: self.home / "opt/electronapp/electronapp"), \
+                mock.patch.object(apps.shutil, "which", lambda prog: wrapper if prog == "browser" else None), \
+                mock.patch.object(apps, "is_fontlab_wrapper", lambda p: str(p) == wrapper):
+            found = {a.entry.id: a for a in apps.scan()}
+            self.assertTrue(found["browser.desktop"].via_wrapper)
+            apps.apply(True)
+        self.assertFalse((paths.P.applications_dir / "browser.desktop").exists())
+        self.assertTrue((paths.P.applications_dir / "electronapp.desktop").exists())
 
     def test_skip_and_rewritten_entry(self) -> None:
         apps.save_choices({"add": [], "skip": ["electronapp.desktop"]})
