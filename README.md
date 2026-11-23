@@ -147,13 +147,15 @@ sandbox that fontlab can't reach, so they keep Chromium's values.
 ```
 
 This removes everything fontlab wrote but keeps your fonts and presets. Add `--purge`
-to delete those as well. `/etc/environment` stays as it is.
+to delete those as well. `/etc/environment` stays as it is. To reset it first, run
+`fontlab set freetype_darkening=off qt_no_synth_bold=off` and then `fontlab apply --system`.
 
 ## Credits
 
 The darkening code is a Python port of FreeType's `FT_Outline_EmboldenXY`. The macOS
-strength values come from the Pathfinder project. Inter is by Rasmus Andersson and
-JetBrains Mono is by JetBrains, both under the SIL Open Font License.
+strength values come from the Pathfinder project. The `strong` FreeType values, the
+icon font rules and the Droid Sans rule follow [lucidglyph](https://github.com/maximilionus/lucidglyph). Inter is by Rasmus
+Andersson and JetBrains Mono is by JetBrains, both under the SIL Open Font License.
 
 ## License
 
