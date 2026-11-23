@@ -183,7 +183,7 @@ def cmd_doctor(_args) -> None:
     for p in PACKAGES:
         line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(statefile.load()),
-         "/etc/environment FREETYPE_PROPERTIES matches the state")
+         "/etc/environment matches the state")
 
 
 def cmd_preview(args) -> None:

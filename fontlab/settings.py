@@ -42,6 +42,9 @@ SETTINGS: tuple[Setting, ...] = (
             "Same, for monospace fonts (terminal). Kept separate so the terminal stays stable."),
     Setting("lcdfilter", "Rendering", "LCD filter", ("default", "light", "legacy", "none"), "light",
             "Subpixel colour filter. FreeType apps only (GTK, terminal); Chromium ignores it."),
+    Setting("small_bold", "Rendering", "Fake bold under 14px", ("off", "on"), "off",
+            "fontconfig's synthetic bold for text smaller than 14 pixels. Some apps ignore it. "
+            "Icon fonts are left out."),
     # Fonts: files built and installed into ~/.local/share/fonts/fontlab.
     Setting("darkening", "Fonts", "Darkening", steps(0, 1, 0.05, 2), "0.00",
             "macOS-style stem darkening baked into Inter and Adwaita Sans. 1 = macOS strength.",
@@ -65,10 +68,14 @@ SETTINGS: tuple[Setting, ...] = (
             "Text gamma in Chromium and Electron apps. Higher = heavier light-on-dark text.",
             needs=("shim",)),
     # System: needs sudo and a new login.
-    Setting("freetype_darkening", "System", "FreeType stem darkening", ("keep", "off", "cff", "all"),
+    Setting("freetype_darkening", "System", "FreeType stem darkening", ("keep", "off", "cff", "all", "strong"),
             "keep", "FREETYPE_PROPERTIES in /etc/environment (GTK, Qt, terminals). keep: fontlab leaves it "
             "alone. off: FreeType default. cff: OpenType CFF fonts. all: also the autofitter. "
+            "strong: all drivers, autofitter darkening kept up to larger sizes (lucidglyph's values). "
             "Needs sudo and a new login."),
+    Setting("qt_no_synth_bold", "System", "Qt: no synthetic bold", ("keep", "off", "on"), "keep",
+            "QT_NO_SYNTHESIZED_BOLD=1 in /etc/environment. Fixes bold looking too heavy with variable "
+            "fonts in some Qt versions. keep: fontlab leaves it alone. Needs sudo and a new login."),
 )
 
 BY_KEY: dict[str, Setting] = {s.key: s for s in SETTINGS}

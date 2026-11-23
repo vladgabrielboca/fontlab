@@ -460,12 +460,12 @@ class Screen:
             return
         curses.def_prog_mode()
         curses.endwin()
-        print("Writing FREETYPE_PROPERTIES to /etc/environment (sudo).")
+        print("Writing /etc/environment (sudo).")
         with self.worker.lock:
             ok = desktop.apply_environment(self.state, interactive=True)
         self.worker.notices = [n for n in self.worker.notices if "sudo" not in n]
         if ok:
-            self.worker.notices.append("FreeType darkening changed: log out and back in to see it")
+            self.worker.notices.append("/etc/environment changed: log out and back in to see it")
         curses.reset_prog_mode()
         self.scr.refresh()
         self.message = "/etc/environment updated" if ok else "sudo failed, nothing changed"

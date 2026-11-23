@@ -1,7 +1,7 @@
 #!/bin/bash
 # Remove fontlab: its fonts and configs, the wrappers (sudo), the command and runtime.
 #   --purge   also delete downloaded font packages, presets, state and cache
-# /etc/environment is left as it is; set freetype_darkening=off first to reset it.
+# /etc/environment is left as it is; set freetype_darkening=off and qt_no_synth_bold=off first to reset it.
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
 ./bin/fontlab uninstall "$@"

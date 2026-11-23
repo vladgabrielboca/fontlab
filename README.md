@@ -74,13 +74,22 @@ a new terminal window for terminal fonts.
 | hinting | how hard letters snap to the pixel grid: none, slight, medium, full |
 | mono_hinting | the same, for monospace fonts in your terminal and editor |
 | lcdfilter | colour filter for subpixel text. Chromium ignores it |
+| small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. Some apps ignore it |
 | darkening | makes Inter and Adwaita Sans thicker the way macOS does it, from 0 to 1 |
 | ui_weight | weight of Inter and Adwaita Sans, from 400 (normal) to 500 |
 | mono_weight | weight of JetBrains Mono |
 | sf_weight | weight of SF Pro Text |
 | web_fonts | the font web pages get when they ask for `sans-serif` or Arial: system, inter, sf or windows |
 | contrast, gamma | text contrast and gamma in every Chromium and Electron app. Higher gamma makes light text on dark backgrounds heavier. The defaults, 0.2 and 1.2, are Chromium's own values |
-| freetype_darkening | FreeType's own darkening for GTK and Qt apps. It needs sudo and a new login. The default, `keep`, leaves your system alone |
+| freetype_darkening | FreeType's own darkening for GTK and Qt apps: `off`, `cff`, `all`, or `strong`. `strong` uses [lucidglyph](https://github.com/maximilionus/lucidglyph)'s values, which keep the darkening on for bigger text. It needs sudo and a new login. The default, `keep`, leaves your system alone |
+| qt_no_synth_bold | sets `QT_NO_SYNTHESIZED_BOLD=1`, for Qt versions that draw bold variable fonts too heavy. Same sudo and login rules as above |
+
+When `freetype_darkening` is `all` or `strong`, or `small_bold` is on, fontlab also turns
+hinting and fake bold off for icon fonts, so they don't get too bold, and hides Droid Sans
+Fallback, whose Chinese and Japanese letters get too heavy. It finds icon fonts by name
+(Font Awesome, Nerd Font symbols, Material Symbols, codicon) and by having no letters
+from common scripts. FreeType still darkens CFF icon fonts like Font Awesome, because
+it does that even without hinting.
 
 If a setting needs a font you haven't installed, it is greyed out and tells you which one.
 
@@ -106,7 +115,7 @@ fontlab keeps your choices in `~/.config/fontlab/state.toml`. From that file it 
 - font files in `~/.local/share/fonts/fontlab`
 - fontconfig rules in `~/.config/fontconfig/conf.d/70-fontlab-render.conf` and `71-fontlab-web.conf`
 - GNOME's font settings, if your desktop has them
-- `/etc/environment`, only if you change `freetype_darkening`
+- `/etc/environment`, only if you change `freetype_darkening` or `qt_no_synth_bold`
 - app launcher entries for Chromium and Electron apps, only if you change contrast or gamma (see below)
 
 It never edits files in `/usr/share`. To hide a system font it replaces, it uses a

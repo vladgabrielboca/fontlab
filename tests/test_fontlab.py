@@ -181,6 +181,16 @@ class FontconfigTest(TempHome):
         self.assertIn('<bool>false</bool></edit>\n    <edit name="hintstyle" mode="assign"><const>hintnone', xml)
         self.assertIn("<const>hintslight</const>", xml)
         self.assertIn("<glob>/x/A&amp;B.ttf</glob>", xml)
+        self.assertNotIn("embolden", xml)
+        self.assertNotIn("Droid", xml)
+
+    def test_darkening_rules(self) -> None:
+        xml = fontconfig.render_conf(dict(DEFAULTS, freetype_darkening="strong"), [])
+        self.assertIn("Font Awesome", xml)
+        self.assertIn("Droid Sans Fallback", xml)
+        bold = fontconfig.render_conf(dict(DEFAULTS, small_bold="on"), [])
+        # fake bold comes before the icon rules, so icons win
+        self.assertLess(bold.index("pixelsize"), bold.index("Icon fonts"))
 
     def test_web_conf(self) -> None:
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS), inter_available=True))
@@ -347,6 +357,22 @@ class EnvironmentTest(unittest.TestCase):
         self.assertIn("autofitter:no-stem-darkening=0",
                       desktop.environment_text(cur, dict(DEFAULTS, freetype_darkening="all")))
         self.assertEqual(desktop.environment_text("", dict(DEFAULTS, freetype_darkening="off")), "")
+
+    def test_strong_replaces_all_and_back(self) -> None:
+        cur = 'FREETYPE_PROPERTIES="truetype:interpreter-version=35"\n'
+        strong = desktop.environment_text(cur, dict(DEFAULTS, freetype_darkening="strong"))
+        self.assertIn("darkening-parameters=500,400,1000,400,2500,400,4000,0", strong)
+        self.assertIn("t1cid:no-stem-darkening=0", strong)
+        back = desktop.environment_text(strong, dict(DEFAULTS, freetype_darkening="all"))
+        self.assertEqual(back, 'FREETYPE_PROPERTIES="truetype:interpreter-version=35 '
+                               'cff:no-stem-darkening=0 autofitter:no-stem-darkening=0"\n')
+
+    def test_qt_variable(self) -> None:
+        cur = 'EDITOR=nvim\nFREETYPE_PROPERTIES="x:y=1"\n'
+        on = desktop.environment_text(cur, dict(DEFAULTS, qt_no_synth_bold="on"))
+        self.assertEqual(on, cur + 'QT_NO_SYNTHESIZED_BOLD="1"\n')
+        self.assertEqual(desktop.environment_text(on, dict(DEFAULTS, qt_no_synth_bold="keep")), on)
+        self.assertEqual(desktop.environment_text(on, dict(DEFAULTS, qt_no_synth_bold="off")), cur)
 
     def test_keep_never_touches_the_file(self) -> None:
         self.assertFalse(desktop.environment_pending(dict(DEFAULTS)))

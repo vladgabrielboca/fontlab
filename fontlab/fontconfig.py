@@ -1,6 +1,7 @@
 """fontconfig files fontlab generates.
 
-70-fontlab-render.conf  antialiasing, hinting, LCD filter, hidden system fonts
+70-fontlab-render.conf  antialiasing, hinting, LCD filter, fake bold, icon fonts and
+                        Droid Sans when darkening is on, hidden system fonts
 71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to (absent for "system")
 """
 
@@ -46,6 +47,38 @@ SF_RULES = """  <match target="pattern">
 """ for style, weight in (("Bold", 200), ("Bold Italic", 200), ("Black", 210), ("Black Italic", 210)))
 
 
+# One letter from each of these scripts. A font with none of them is treated as an icon
+# font. Written first for fonts without "&", then for fonts without a space.
+SCRIPT_PROBES = (0x0410, 0x03B1, 0x0639, 0x4E2D, 0x05D0, 0x0905, 0x0E01, 0x10D0, 0x0531,
+                 0x12A0, 0x0B85, 0x0985)
+ICON_FAMILIES = (("contains", "Font Awesome"), ("eq", "codicon"), ("eq", "Symbols Nerd Font"),
+                 ("eq", "Material Symbols"), ("eq", "Google Symbols"))
+NO_DARKEN = ('    <edit name="hinting" mode="assign"><bool>false</bool></edit>\n'
+             '    <edit name="embolden" mode="assign"><bool>false</bool></edit>\n')
+# Stem darkening makes its CJK letters too heavy; Noto CJK takes over.
+DARKENING_REJECTS = ("Droid Sans Fallback", "Droid Sans Japanese")
+
+
+def darkening_on(state: State) -> bool:
+    return state["freetype_darkening"] in ("all", "strong") or state["small_bold"] == "on"
+
+
+def icon_rules() -> str:
+    """Hinting off for icon fonts, which also turns off autofitter darkening, and no fake bold.
+    CFF icon fonts (Font Awesome) still get CFF darkening: FreeType applies it unhinted too."""
+    out = "  <!-- Icon fonts: no autofitter darkening, no fake bold. -->\n"
+    for first in (0x0026, 0x0020):
+        out += '  <match target="font">\n'
+        out += "".join(f'    <test name="charset" compare="not_contains"><charset><int>0x{c:04X}</int></charset></test>\n'
+                       for c in (first, *SCRIPT_PROBES))
+        out += NO_DARKEN + "  </match>\n"
+    for compare, family in ICON_FAMILIES:
+        out += ('  <match target="font">\n'
+                f'    <test name="family" qual="any" compare="{compare}"><string>{family}</string></test>\n'
+                + NO_DARKEN + "  </match>\n")
+    return out
+
+
 def _hint_edits(style: str, indent: str) -> str:
     enabled = "false" if style == "none" else "true"
     return (f'{indent}<edit name="hinting" mode="assign"><bool>{enabled}</bool></edit>\n'
@@ -64,11 +97,23 @@ def render_conf(state: State, rejects: Iterable[str]) -> str:
     out += '    <test name="spacing" compare="eq"><const>mono</const></test>\n'
     out += _hint_edits(state["mono_hinting"], "    ")
     out += "  </match>\n"
+    if state["small_bold"] == "on":
+        out += '  <match target="font">\n'
+        out += '    <test name="pixelsize" compare="less"><double>14</double></test>\n'
+        out += '    <edit name="embolden" mode="assign"><bool>true</bool></edit>\n'
+        out += "  </match>\n"
+    darken = darkening_on(state)
+    if darken:
+        out += icon_rules()     # after the hinting and embolden rules, so it wins
     rejects = list(rejects)
-    if rejects:
-        out += "  <!-- System files replaced by fontlab's copies in ~/.local/share/fonts/fontlab. -->\n"
+    if rejects or darken:
         out += "  <selectfont><rejectfont>\n"
-        out += "".join(f"    <glob>{escape(g)}</glob>\n" for g in rejects)
+        if rejects:
+            out += "    <!-- System files replaced by fontlab's copies in ~/.local/share/fonts/fontlab. -->\n"
+            out += "".join(f"    <glob>{escape(g)}</glob>\n" for g in rejects)
+        if darken:
+            out += "".join(f'    <pattern><patelt name="family"><string>{f}</string></patelt></pattern>\n'
+                           for f in DARKENING_REJECTS)
         out += "  </rejectfont></selectfont>\n"
     return out + "</fontconfig>\n"
 

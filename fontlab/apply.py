@@ -62,9 +62,9 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     if desktop.environment_pending(state):
         if desktop.apply_environment(state, interactive=system):
             report.changed.append("/etc/environment")
-            report.notices.append("FreeType darkening changed: log out and back in to see it")
+            report.notices.append("/etc/environment changed: log out and back in to see it")
         else:
-            report.notices.append("FreeType darkening needs sudo: press ! in fontlab, "
+            report.notices.append("/etc/environment needs sudo: press ! in fontlab, "
                                   "or run: fontlab apply --system")
     return report
 
