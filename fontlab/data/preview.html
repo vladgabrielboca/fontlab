@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>fontlab preview</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: sans-serif; background: #000; }
+  header { padding: 10px 16px; font: 13px monospace; color: #9a9a9a; background: #000;
+           border-bottom: 1px solid #222; white-space: pre-wrap; }
+  .panels { display: grid; grid-template-columns: repeat(2, 1fr); }
+  section { padding: 16px 20px 20px; }
+  .black { background: #000; color: #e6e6e6; }
+  .dark  { background: #24272e; color: #e6e6e6; }
+  .white { background: #fff; color: #1a1a1a; }
+  .grey  { background: #f0f0f0; color: #333; }
+  h2 { font: 600 11px monospace; text-transform: uppercase; letter-spacing: .08em;
+       opacity: .55; margin: 0 0 10px; }
+  p { margin: 0 0 8px; line-height: 1.45; }
+  .s11 { font-size: 11px; } .s12 { font-size: 12px; } .s13 { font-size: 13px; }
+  .s14 { font-size: 14px; } .s16 { font-size: 16px; } .s20 { font-size: 20px; }
+  .ui { font-family: system-ui; } .arial { font-family: Arial; }
+  .serif { font-family: serif; } .mono { font-family: monospace; }
+  .glyphs { font-size: 15px; letter-spacing: .02em; }
+</style>
+</head>
+<body>
+<header>{{SETTINGS}}</header>
+<div class="panels">
+  {{PANELS}}
+</div>
+</body>
+</html>
