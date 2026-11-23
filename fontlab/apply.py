@@ -49,6 +49,8 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     if fonts_changed or conf_changed:
         progress("fc-cache")
         fc_cache()
+    if fonts_changed and desktop.shell_restart_available():
+        report.notices.append(desktop.SHELL_NOTICE)
 
     progress("chromium")
     # Without the shim, undo any app wrapping so no desktop entry points at a missing launcher.

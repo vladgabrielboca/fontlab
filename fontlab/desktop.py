@@ -27,6 +27,25 @@ FREETYPE = {      # "keep" is not here: fontlab then never touches /etc/environm
 }
 
 
+# Qt apps read the font list once at start. After fontlab replaces or removes a font file,
+# a long-running one (the Omarchy shell) draws that font's text with the wrong glyphs or a
+# fallback (Arabic, on Omarchy) until it restarts.
+SHELL_RESTART = "omarchy-restart-shell"
+SHELL_NOTICE = "font files changed: press R to restart the Omarchy shell (or: omarchy restart shell)"
+
+
+def shell_restart_available() -> bool:
+    return shutil.which(SHELL_RESTART) is not None
+
+
+def restart_shell() -> None:
+    """Raises RuntimeError with the script's message when the restart fails."""
+    r = subprocess.run([SHELL_RESTART], capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        lines = (r.stderr or r.stdout).strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else f"{SHELL_RESTART} failed")
+
+
 def gsettings_values(state: State) -> dict[str, str]:
     aa = state["antialias"]
     values = {"font-antialiasing": "grayscale" if aa == "grayscale" else "rgba",

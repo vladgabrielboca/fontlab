@@ -315,6 +315,23 @@ class CompareTest(TempHome):
         self.assertEqual(args, [])
 
 
+class ShellNoticeTest(TempHome):
+    def test_font_change_asks_for_a_shell_restart(self) -> None:
+        from unittest import mock
+        from fontlab import apply as applymod
+        self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]})
+        with mock.patch.object(applymod, "fc_cache"), \
+                mock.patch.object(applymod.chromium, "apply", return_value=False), \
+                mock.patch.object(applymod.apps, "apply", return_value=False), \
+                mock.patch.object(desktop, "apply_gsettings", return_value=False), \
+                mock.patch.object(desktop, "environment_pending", return_value=False), \
+                mock.patch.object(desktop, "shell_restart_available", return_value=True):
+            report = applymod.apply(dict(DEFAULTS, mono_weight="475"))
+            self.assertIn(desktop.SHELL_NOTICE, report.notices)
+            report = applymod.apply(dict(DEFAULTS, mono_weight="475"))     # nothing changed
+            self.assertNotIn(desktop.SHELL_NOTICE, report.notices)
+
+
 class ChromiumDefaultsTest(TempHome):
     def test_chromium_values_add_nothing(self) -> None:
         self.assertIsNone(chromium.text_conf(dict(DEFAULTS)))

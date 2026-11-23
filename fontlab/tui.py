@@ -29,7 +29,7 @@ from .toolchain import seven_zip
 
 LOGO = ("█▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄",
         "█▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█")
-KEYS = "↑↓ move  ←→ change  enter pick/install  r default  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
+KEYS = "↑↓ move  ←→ change  enter pick/install  r default  R restart shell  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
 FONTS_GROUP = "Install fonts"
 DEBOUNCE = 0.35
 LABEL_W = 26
@@ -51,6 +51,7 @@ class Worker(threading.Thread):
         self.notices: list[str] = []
         self.error: str | None = None
         self.busy = False
+        self.shell_stale = False              # fonts changed since the shell last restarted
 
     @property
     def pending(self) -> bool:
@@ -96,7 +97,9 @@ class Worker(threading.Thread):
                     return
                 state = job[1]
                 report = apply(state, progress=lambda step: self._progress(f"applying: {step}…"))
-            self.notices = report.notices
+            self.shell_stale |= desktop.SHELL_NOTICE in report.notices
+            others = [n for n in report.notices if n != desktop.SHELL_NOTICE]
+            self.notices = ([desktop.SHELL_NOTICE] if self.shell_stale else []) + others
             self.status = report.summary()
             if self.preview_on:
                 self.status += ", preview restarted"
@@ -454,6 +457,18 @@ class Screen:
 
         self.worker.task(f"opening preset '{name}' for comparison", job)
 
+    def restart_shell(self) -> None:
+        if not desktop.shell_restart_available():
+            self.message = f"no Omarchy shell here ({desktop.SHELL_RESTART} not found)"
+            return
+
+        def job(_progress: Callable[[str], None]) -> None:
+            desktop.restart_shell()
+            self.worker.shell_stale = False
+            self.worker.notices = [n for n in self.worker.notices if n != desktop.SHELL_NOTICE]
+
+        self.worker.task("restarting the Omarchy shell", job)
+
     def sudo_apply(self) -> None:
         if not desktop.environment_pending(self.state):
             self.message = "/etc/environment already matches"
@@ -493,6 +508,8 @@ class Screen:
                 self.install(r)
         elif k == ord("r") and isinstance(r, Setting):
             self.set_value(r, r.default)
+        elif k == ord("R"):
+            self.restart_shell()
         elif k == ord("x") and isinstance(r, Package):
             self.remove(r)
         elif k == ord("p"):
