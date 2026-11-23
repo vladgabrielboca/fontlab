@@ -8,6 +8,7 @@ restarts the preview window if it is on.
 from __future__ import annotations
 
 import curses
+import os
 import threading
 import time
 import traceback
@@ -315,7 +316,7 @@ class Screen:
                     self.open_preset()
                 elif k == ord("!"):
                     self.sudo_apply()
-                elif k in (ord("q"), 27):
+                elif k == ord("q"):     # not Esc: a stray escape sequence must not quit
                     if self.applier.pending:
                         self.message = "still applying, wait a moment"
                         continue
@@ -325,4 +326,5 @@ class Screen:
 
 
 def main() -> None:
+    os.environ.setdefault("ESCDELAY", "25")   # Esc closes popups without a 1 s wait
     curses.wrapper(lambda stdscr: Screen(stdscr).run())
