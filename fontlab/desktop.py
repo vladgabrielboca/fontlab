@@ -31,7 +31,7 @@ FREETYPE = {      # "keep" is not here: fontlab then never touches /etc/environm
 # a long-running one (the Omarchy shell) draws that font's text with the wrong glyphs or a
 # fallback (Arabic, on Omarchy) until it restarts.
 SHELL_RESTART = "omarchy-restart-shell"
-SHELL_NOTICE = "font files changed: press R to restart the Omarchy shell (or: omarchy restart shell)"
+SHELL_NOTICE = "font files changed: press b in fontlab to restart the Omarchy shell (or: omarchy restart shell)"
 
 
 def shell_restart_available() -> bool:

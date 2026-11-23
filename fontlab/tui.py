@@ -29,7 +29,7 @@ from .toolchain import seven_zip
 
 LOGO = ("█▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄",
         "█▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█")
-KEYS = "↑↓ move  ←→ change  enter pick/install  r default  R restart shell  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
+KEYS = "↑↓ move  ←→ change  enter pick/install  r default  b restart shell  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
 FONTS_GROUP = "Install fonts"
 DEBOUNCE = 0.35
 LABEL_W = 26
@@ -508,7 +508,7 @@ class Screen:
                 self.install(r)
         elif k == ord("r") and isinstance(r, Setting):
             self.set_value(r, r.default)
-        elif k == ord("R"):
+        elif k == ord("b"):       # not R: Shift+r can arrive as plain r (reset)
             self.restart_shell()
         elif k == ord("x") and isinstance(r, Package):
             self.remove(r)
