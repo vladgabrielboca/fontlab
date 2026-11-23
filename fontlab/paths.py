@@ -68,8 +68,8 @@ class Paths:
 
     @property
     def chromium_fonts_conf(self) -> Path:
-        """Private fontconfig for Chromium-family apps, only when web_fonts = windows.
-        chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
+        """Private fontconfig for Chromium-family apps, when web_fonts is not "system"
+        (see chromium.py). chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
         return self.config_dir / "chromium-fonts.conf"
 
     @property

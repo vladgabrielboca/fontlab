@@ -15,5 +15,6 @@ if [ -f "$C/chromium-text.conf" ]; then
     esac
   fi
 fi
-# Windows fonts, Chromium-family apps only (written when web_fonts = windows).
+# Private fontconfig, Chromium-family apps only: CSS system-ui follows web_fonts, and
+# the Windows fonts when web_fonts = windows.
 [ -f "$C/chromium-fonts.conf" ] && export FONTCONFIG_FILE="$C/chromium-fonts.conf"

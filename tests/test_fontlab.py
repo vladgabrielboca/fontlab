@@ -243,6 +243,27 @@ class FontconfigTest(TempHome):
 
 
 class ChromiumTest(TempHome):
+    def ui_font(self, family: str | None):
+        from unittest import mock
+        return mock.patch.object(chromium, "gtk_ui_family", return_value=family)
+
+    def test_system_ui_follows_web_fonts(self) -> None:
+        with self.ui_font("Adwaita Sans"):
+            self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS)))          # system: desktop decides
+            xml = chromium.fonts_conf(dict(DEFAULTS, web_fonts="sf"))
+            self.assertIn("<string>Adwaita Sans</string>", xml)
+            self.assertIn("<string>SF Pro Text</string>", xml)
+            self.assertIn("/50-user.conf", xml)                            # user's own rules stay
+            self.assertNotIn("web-windows.conf", xml)
+            self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="sf")))
+            win = chromium.fonts_conf(dict(DEFAULTS, web_fonts="windows"))
+            self.assertIn("<string>Segoe UI</string>", win)
+            self.assertNotIn("50-user.conf", win)
+        with self.ui_font("Inter"):                                         # already the web font
+            self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS, web_fonts="inter")))
+        with self.ui_font(None):                                            # no gsettings
+            self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS, web_fonts="inter")))
+
     def test_private_conf_skips_user_conf_d(self) -> None:
         xml = chromium.private_fonts_conf()
         self.assertNotIn("50-user.conf", xml)
@@ -263,7 +284,8 @@ class CompareTest(TempHome):
         self.fake_font(paths.P.fontconfig_dir / "10-mine.conf")
         self.fake_font(paths.P.web_conf)
         st = dict(DEFAULTS, ui_weight="450", web_fonts="inter", contrast="0.5")
-        with mock.patch.object(preview.subprocess, "run"):
+        with mock.patch.object(preview.subprocess, "run"), \
+                mock.patch.object(chromium, "gtk_ui_family", return_value="Adwaita Sans"):
             env, args = preview.compare_setup(st)
         d = paths.P.preview_dir / "compare"
         linked = sorted(f.name for f in (d / "fonts/inter").iterdir())
@@ -277,6 +299,7 @@ class CompareTest(TempHome):
         self.assertNotIn(str(paths.P.web_conf), conf)
         self.assertIn(str(paths.P.fontconfig_dir / "10-mine.conf"), conf)
         self.assertNotIn("web-windows.conf", conf)
+        self.assertIn("<string>Adwaita Sans</string>", conf)               # CSS system-ui -> Inter
         self.assertEqual(env["FONTCONFIG_FILE"], str(d / "fonts.conf"))
         self.assertIn("CONTRAST=0.5", Path(env["FONTLAB_TEXT_CONF"]).read_text())
         self.assertEqual(args, ["--text-contrast=0.5", "--text-gamma=1.2"])
