@@ -3,8 +3,8 @@ and install them.
 
 Each family is installed into its own folder under ~/.local/share/fonts/fontlab and
 replaced as a whole, so two settings can never leave a mix of files behind. Darkened
-builds are cached in ~/.cache/fontlab/builds. A family whose package is not
-installed has no folder, and hides no system fonts.
+builds are cached in ~/.cache/fontlab/builds. A family with nothing to install has an
+empty folder (or none, if it never had files), and hides no system fonts.
 """
 
 from __future__ import annotations
@@ -156,19 +156,33 @@ def install(state: State) -> tuple[bool, list[FontSet]]:
     files = realize([fs for fs in todo if fs.sources])
     root = paths.P.installed_fonts
     root.mkdir(parents=True, exist_ok=True)
+    dirs = [root] + [root / fs.family.package for fs in todo]
+    before = {d: d.stat().st_mtime_ns for d in dirs if d.exists()}
     for fs in todo:
-        target = root / fs.family.package
-        if not fs.sources:
-            shutil.rmtree(target, ignore_errors=True)
-            continue
+        # A family without files keeps an empty folder, so the folder never comes and
+        # goes and its old mtime is always known to newer_than() below.
         stage = root / f".{fs.family.package}.stage"
         shutil.rmtree(stage, ignore_errors=True)
         stage.mkdir()
-        for f in files[fs.family.package]:
-            link_or_copy(f, stage / f.name)
-        (stage / MARKER).write_text(fs.key + "\n")
-        replace_dir(stage, target)
+        if fs.sources:
+            for f in files[fs.family.package]:
+                link_or_copy(f, stage / f.name)
+            (stage / MARKER).write_text(fs.key + "\n")
+        replace_dir(stage, root / fs.family.package)
+    for d, old in before.items():
+        newer_than(d, old)
     return True, sets
+
+
+def newer_than(d: Path, old_ns: int) -> None:
+    """fontconfig trusts a folder's cache while the folder's mtime has the same whole
+    second as when the cache was written. Two applies in one second (the TUI does that)
+    would leave fc-cache sure the old cache is still right: the new fonts stay invisible
+    until something else touches the folder. Move the mtime to the next second then."""
+    sec = 1_000_000_000
+    if d.stat().st_mtime_ns // sec == old_ns // sec:
+        t = (old_ns // sec + 1) * sec
+        os.utime(d, ns=(t, t))
 
 
 def clean_cache() -> int:

@@ -136,7 +136,7 @@ class FontsTest(TempHome):
         changed, sets = fonts.install(dict(DEFAULTS))     # back to stock
         self.assertTrue(changed)
         self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "400 Inter-Regular.ttf")
-        self.assertFalse(self.installed("jbm").exists())  # system font is the base: no folder, no reject
+        self.assertEqual(list(self.installed("jbm").iterdir()), [])  # system font is the base: no files, no reject
         self.assertNotIn("/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
                          [g for fs in sets for g in fs.rejects])
 
@@ -145,7 +145,17 @@ class FontsTest(TempHome):
         self.assertTrue(self.installed("sf").exists())
         BY_ID["sf"].remove()
         fonts.install(dict(DEFAULTS))
-        self.assertFalse(self.installed("sf").exists())
+        self.assertEqual(list(self.installed("sf").iterdir()), [])
+
+    def test_folder_mtime_leaves_the_cached_second(self) -> None:
+        # fontconfig keeps a cache while the folder mtime's whole second is unchanged.
+        st = dict(DEFAULTS, ui_weight="450", mono_weight="475")
+        fonts.install(st)
+        dirs = [paths.P.installed_fonts, self.installed("jbm"), self.installed("inter")]
+        before = {d: d.stat().st_mtime_ns // 10**9 for d in dirs}
+        fonts.install(dict(DEFAULTS))                 # right away, same second
+        for d in dirs:
+            self.assertNotEqual(d.stat().st_mtime_ns // 10**9, before[d], d)
 
     def test_google_sans_ignores_weight_and_darkening(self) -> None:
         self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "googlesans"))
