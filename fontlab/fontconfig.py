@@ -1,7 +1,7 @@
 """fontconfig files fontlab generates.
 
 70-fontlab-render.conf  antialiasing, hinting, LCD filter, hidden system fonts
-71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to (absent for "default")
+71-fontlab-web.conf     what sans-serif, system-ui, Arial etc. resolve to (absent for "system")
 """
 
 from __future__ import annotations
@@ -106,8 +106,8 @@ def web_conf(state: State, inter_available: bool) -> str | None:
     """None means no file: the system decides."""
     choice = state["web_fonts"]
     if choice == "windows":            # Chromium gets Windows fonts (chromium.py); others keep Inter
-        choice = "inter" if inter_available else "default"
-    if choice == "default":
+        choice = "inter" if inter_available else "system"
+    if choice == "system":
         return None
     rewrites = system_sans_rewrites()
     if choice == "inter":

@@ -84,11 +84,11 @@ class AvailabilityTest(TempHome):
         self.assertEqual(ctx.setting_blocker(BY_KEY["hinting"]), None)
         self.assertIn("Inter", ctx.setting_blocker(BY_KEY["ui_weight"]))
         self.assertIn("shim", ctx.setting_blocker(BY_KEY["gamma"]))
-        self.assertEqual(ctx.choices(BY_KEY["web_fonts"]), ["default"])
+        self.assertEqual(ctx.choices(BY_KEY["web_fonts"]), ["system"])
 
     def test_preset_from_another_machine_falls_back(self) -> None:
         st, notices = Context.detect().effective(dict(DEFAULTS, web_fonts="sf", sf_weight="450", hinting="full"))
-        self.assertEqual((st["web_fonts"], st["sf_weight"], st["hinting"]), ("default", "400", "full"))
+        self.assertEqual((st["web_fonts"], st["sf_weight"], st["hinting"]), ("system", "400", "full"))
         self.assertEqual(len(notices), 2)
 
     def test_weight_choices_follow_manifest(self) -> None:

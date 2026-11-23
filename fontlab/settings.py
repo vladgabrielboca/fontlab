@@ -53,8 +53,8 @@ SETTINGS: tuple[Setting, ...] = (
             needs=("jbm",)),
     Setting("sf_weight", "Fonts", "SF Pro Text weight", WEIGHTS, "400",
             "Weight of SF Pro Text Regular/Italic, used when web fonts = sf.", needs=("sf",)),
-    Setting("web_fonts", "Fonts", "Web and UI sans font", ("default", "inter", "sf", "windows"), "default",
-            "What sans-serif, system-ui, Arial etc. become. default: your system's choice. "
+    Setting("web_fonts", "Fonts", "Web and UI sans font", ("system", "inter", "sf", "windows"), "system",
+            "What sans-serif, system-ui, Arial etc. become. system: your distro's choice. "
             "windows: Chromium uses Windows 11 fonts, other apps keep Inter."),
     # Chromium: Skia text contrast and gamma (web pages via the shim, browser UI via wrapper flags).
     Setting("contrast", "Chromium", "Text contrast", steps(0, 1, 0.1, 1), "0.0",
