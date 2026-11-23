@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import chromium, desktop, fonts, paths, state as statefile, toolchain
+from . import apps, chromium, desktop, fonts, paths, state as statefile, toolchain
 from .apply import Report, apply, uninstall
 from .availability import Context
 from .download import DownloadError
@@ -23,6 +23,7 @@ EPILOG = """examples:
   fontlab fonts install windows --from /run/media/me/Windows/Windows/Fonts
   fontlab set gamma=1.4 hinting=slight
   fontlab preset save mac-half
+  fontlab apps                     Chromium and Electron apps that get contrast and gamma
   fontlab doctor                   check this system
 """
 
@@ -134,6 +135,31 @@ def cmd_fonts(args) -> None:
     print_report(apply(statefile.load()))
 
 
+def cmd_apps(args) -> None:
+    if args.action in ("add", "skip", "reset"):
+        if not args.name:
+            raise StateError(f"apps {args.action} needs an app name (see: fontlab apps)")
+        choices = apps.load_choices()
+        for key in ("add", "skip"):
+            if args.name in choices[key]:
+                choices[key].remove(args.name)
+        if args.action != "reset":
+            choices[args.action].append(args.name)
+        apps.save_choices(choices)
+        print_report(apply(statefile.load()))
+        return
+    active = chromium.needs_launcher(statefile.load())
+    found = [a for a in apps.scan() if a.reason]
+    for a in sorted(found, key=lambda a: a.entry.name.lower()):
+        mark = "-" if a.skipped else "✓" if active else " "
+        print(f" {mark} {a.entry.name:<28} {a.entry.id:<36} {a.reason}")
+    if not found:
+        print("no Chromium or Electron apps found")
+    if not active:
+        print("\nContrast and gamma are Chromium's own values, so no app needs wrapping right now.")
+    print("\nMissing an app? fontlab apps add NAME. Wrong one? fontlab apps skip NAME.")
+
+
 def cmd_doctor(_args) -> None:
     ok, warn = "✓", "!"
 
@@ -149,6 +175,9 @@ def cmd_doctor(_args) -> None:
     line(ctx.shim, f"Chromium shim in {paths.P.runtime_dir} (install.sh)")
     for app, active in chromium.wrapped_apps().items():
         line(active, f"wrapper for {app}" + ("" if active else ": not active, run install.sh"))
+    if chromium.needs_launcher(statefile.load()):
+        line(ctx.shim and apps.wrapped_count() > 0,
+             f"{apps.wrapped_count()} app launcher entries start through fontlab (fontlab apps)")
     for p in PACKAGES:
         line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(statefile.load()),
@@ -200,6 +229,10 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("--from", dest="from_dir", metavar="DIR", help="import from a folder instead of downloading")
     f.add_argument("--accept-license", action="store_true", help="accept the font's license (sf, windows)")
     f.set_defaults(func=cmd_fonts)
+    ap = sub.add_parser("apps", help="Chromium and Electron apps that get contrast and gamma")
+    ap.add_argument("action", nargs="?", choices=("add", "skip", "reset"))
+    ap.add_argument("name", nargs="?", help="desktop file name, app name or program")
+    ap.set_defaults(func=cmd_apps)
     sub.add_parser("doctor", help="check this system").set_defaults(func=cmd_doctor)
     sub.add_parser("preview", help="open the preview window once").set_defaults(func=cmd_preview)
     u = sub.add_parser("uninstall", help="remove everything fontlab wrote (uninstall.sh also removes wrappers)")

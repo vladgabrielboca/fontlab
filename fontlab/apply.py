@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-from . import chromium, desktop, fontconfig, fonts, paths
+from . import apps, chromium, desktop, fontconfig, fonts, paths
 from .availability import Context
 from .fsutil import remove, write_if_changed
 from .state import State
@@ -49,10 +49,11 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
         progress("fc-cache")
         fc_cache()
 
-    if ctx.shim:
-        progress("chromium")
-        if chromium.apply(state):
-            report.changed.append("chromium")
+    progress("chromium")
+    # Without the shim, undo any app wrapping so no desktop entry points at a missing launcher.
+    chromium_changed = chromium.apply(state) if ctx.shim else apps.apply(False)
+    if chromium_changed:
+        report.changed.append("chromium")
 
     progress("gsettings")
     if desktop.apply_gsettings(state):
@@ -73,6 +74,7 @@ def uninstall(purge: bool = False) -> list[str]:
     /etc/environment and the /usr/local/bin wrappers are left to uninstall.sh."""
     p = paths.P
     removed = []
+    apps.apply(False)
     for f in (p.render_conf, p.web_conf, p.chromium_text_conf, p.chromium_fonts_conf):
         if remove(f):
             removed.append(str(f))

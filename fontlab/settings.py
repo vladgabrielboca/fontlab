@@ -57,10 +57,12 @@ SETTINGS: tuple[Setting, ...] = (
             "What sans-serif, system-ui, Arial etc. become. system: your distro's choice. "
             "windows: Chromium uses Windows 11 fonts, other apps keep Inter."),
     # Chromium: Skia text contrast and gamma (web pages via the shim, browser UI via wrapper flags).
-    Setting("contrast", "Chromium", "Text contrast", steps(0, 1, 0.1, 1), "0.0",
-            "Skia text contrast. 0 = linear coverage.", needs=("shim",)),
-    Setting("gamma", "Chromium", "Text gamma", steps(1, 2.2, 0.1, 1), "1.4",
-            "Skia text gamma. Higher = heavier light-on-dark text, but it depends on text colour only.",
+    # The defaults are Chromium's own Linux values; at the defaults fontlab adds nothing.
+    Setting("contrast", "Chromium", "Text contrast", steps(0, 1, 0.1, 1), "0.2",
+            "Text contrast in Chromium and Electron apps. 0.2 is Chromium's own value.",
+            needs=("shim",)),
+    Setting("gamma", "Chromium", "Text gamma", steps(1, 2.2, 0.1, 1), "1.2",
+            "Text gamma in Chromium and Electron apps. Higher = heavier light-on-dark text.",
             needs=("shim",)),
     # System: needs sudo and a new login.
     Setting("freetype_darkening", "System", "FreeType stem darkening", ("keep", "off", "cff", "all"),

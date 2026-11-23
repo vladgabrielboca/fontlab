@@ -8,7 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fontlab import chromium, desktop, fontconfig, fonts, paths
+import os
+
+from fontlab import apps, chromium, desktop, fontconfig, fonts, paths
 from fontlab import state as statefile
 from fontlab.availability import Context
 from fontlab.packages import BY_ID, Manifest, WindowsFonts
@@ -210,6 +212,77 @@ class ChromiumTest(TempHome):
         self.assertIn("web-windows.conf", xml)
         self.assertIn(str(paths.P.render_conf), xml)
         self.assertIn(str(paths.P.windows_fonts), xml)
+
+
+class ChromiumDefaultsTest(TempHome):
+    def test_chromium_values_add_nothing(self) -> None:
+        self.assertIsNone(chromium.text_conf(dict(DEFAULTS)))
+        self.assertFalse(chromium.needs_launcher(dict(DEFAULTS)))
+        self.assertIn("GAMMA=1.4", chromium.text_conf(dict(DEFAULTS, gamma="1.4")))
+        self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="windows")))
+
+
+class AppsTest(TempHome):
+    def setUp(self) -> None:
+        super().setUp()
+        self.fake_font(paths.P.launcher, "#!/bin/sh")
+        app = self.home / "opt/electronapp"
+        for n in ("icudtl.dat", "resources.pak", "electronapp"):
+            self.fake_font(app / n)
+        self.system = self.home / "share"
+        self.desktop(self.system / "applications/electronapp.desktop", f"{app}/electronapp %U")
+        self.desktop(self.system / "applications/editor.desktop", "/nonexistent/editor %F")
+        self.user_entry = self.desktop(paths.P.applications_dir / "mine.desktop",
+                                       f'"{app}/electronapp" --profile x', extra="DBusActivatable=true\n")
+        self._old = os.environ.get("XDG_DATA_DIRS")
+        os.environ["XDG_DATA_DIRS"] = str(self.system)
+
+    def tearDown(self) -> None:
+        if self._old is None:
+            os.environ.pop("XDG_DATA_DIRS", None)
+        else:
+            os.environ["XDG_DATA_DIRS"] = self._old
+        super().tearDown()
+
+    def desktop(self, path: Path, exec_line: str, extra: str = "") -> str:
+        text = f"[Desktop Entry]\nType=Application\nName={path.stem}\nExec={exec_line}\n{extra}" \
+               f"[Desktop Action new]\nExec={exec_line} --new\n"
+        self.fake_font(path, text)
+        return text
+
+    def test_detects_only_chromium_apps(self) -> None:
+        found = {a.entry.id: a.reason for a in apps.scan()}
+        self.assertTrue(found["electronapp.desktop"])
+        self.assertTrue(found["mine.desktop"])
+        self.assertIsNone(found["editor.desktop"])
+
+    def test_wrap_and_undo(self) -> None:
+        launcher = str(paths.P.launcher)
+        self.assertTrue(apps.apply(True))
+        copy = (paths.P.applications_dir / "electronapp.desktop").read_text()
+        self.assertEqual(copy.count(f"Exec={launcher} "), 2)
+        self.assertIn("X-Fontlab-Source=", copy)
+        mine = (paths.P.applications_dir / "mine.desktop").read_text()
+        self.assertIn(f'Exec={launcher} "', mine)
+        self.assertNotIn("DBusActivatable", mine)
+        self.assertFalse((paths.P.applications_dir / "editor.desktop").exists())
+        self.assertFalse(apps.apply(True))                   # nothing left to do
+
+        self.assertTrue(apps.apply(False))
+        self.assertFalse((paths.P.applications_dir / "electronapp.desktop").exists())
+        self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), self.user_entry)
+        self.assertFalse((paths.P.desktop_backup / "mine.desktop").exists())
+
+    def test_skip_and_rewritten_entry(self) -> None:
+        apps.save_choices({"add": [], "skip": ["electronapp.desktop"]})
+        apps.apply(True)
+        self.assertFalse((paths.P.applications_dir / "electronapp.desktop").exists())
+        # an app updater rewrites the user's entry: the new text becomes the original
+        new = self.desktop(paths.P.applications_dir / "mine.desktop", f"{self.home}/opt/electronapp/electronapp")
+        apps.apply(True)
+        self.assertEqual((paths.P.desktop_backup / "mine.desktop").read_text(), new)
+        apps.apply(False)
+        self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), new)
 
 
 class EnvironmentTest(unittest.TestCase):

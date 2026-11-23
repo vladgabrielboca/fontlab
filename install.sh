@@ -29,6 +29,7 @@ make -s -C chromium
 mkdir -p "$RUNTIME"
 install -m755 chromium/fontlab-text-shim.so "$RUNTIME/"
 install -m644 chromium/chromium-env.sh "$RUNTIME/"
+install -m755 chromium/fontlab-launch "$RUNTIME/"
 echo "runtime: $RUNTIME"
 
 APPS=$(python3 -c 'import sys; sys.path.insert(0, "."); from fontlab.chromium import APPS; print(*APPS)')

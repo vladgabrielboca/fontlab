@@ -1,0 +1,15 @@
+#!/bin/sh
+# fontlab launcher. fontlab puts it in front of the Exec line of Chromium and Electron
+# apps' desktop entries, so apps started from the app launcher get the text shim.
+# Installed to ~/.local/share/fontlab/runtime by install.sh.
+FONTLAB_ARGS=
+H="$HOME/.local/share/fontlab/runtime/chromium-env.sh"; [ -r "$H" ] && . "$H"
+# Browsers have a fontlab wrapper in /usr/local/bin that also adds the browser UI flags.
+n=${1##*/}
+w=/usr/local/bin/$n
+if [ -n "$n" ] && { [ "$1" = "$n" ] || [ "$1" = "/usr/bin/$n" ]; } &&
+   [ -x "$w" ] && grep -q "fontlab launch wrapper" "$w" 2>/dev/null; then
+  shift
+  exec "$w" "$@"
+fi
+exec "$@"

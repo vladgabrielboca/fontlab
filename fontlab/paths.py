@@ -77,6 +77,26 @@ class Paths:
         """Shim library and chromium-env.sh, installed by install.sh."""
         return self.home / ".local/share/fontlab/runtime"
 
+    @property
+    def launcher(self) -> Path:
+        """Prefix fontlab puts in front of Chromium/Electron apps' desktop Exec lines."""
+        return self.runtime_dir / "fontlab-launch"
+
+    @property
+    def applications_dir(self) -> Path:
+        """User desktop entries. A file here hides the system entry with the same name."""
+        return self.home / ".local/share/applications"
+
+    @property
+    def desktop_backup(self) -> Path:
+        """Originals of the user's own desktop entries that fontlab edited in place."""
+        return self.home / ".local/share/fontlab/desktop-backup"
+
+    @property
+    def apps_file(self) -> Path:
+        """Apps the user added or skipped by hand: {"add": [...], "skip": [...]}."""
+        return self.config_dir / "apps.json"
+
     # --- cache --------------------------------------------------------------
     @property
     def cache_dir(self) -> Path:

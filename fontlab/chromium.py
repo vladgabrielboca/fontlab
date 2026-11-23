@@ -1,7 +1,9 @@
-"""Chromium-family apps (browsers and Electron apps launched through fontlab's wrappers).
+"""Chromium-family apps: browsers, Electron and CEF apps.
 
-Text contrast/gamma: the wrappers in /usr/local/bin source chromium-env.sh, which reads
-chromium-text.conf. It passes --text-contrast/--text-gamma on the command line (browser
+Text contrast/gamma: the wrappers in /usr/local/bin (terminal launches) and fontlab-launch
+(desktop entries, see apps.py) source chromium-env.sh, which reads chromium-text.conf.
+The file only exists when the values differ from Chromium's own, so at the defaults
+every app renders exactly as without fontlab. It passes --text-contrast/--text-gamma on the command line (browser
 UI) and preloads the shim, which adds them to renderer launches (web pages); Chromium
 does not forward these switches to renderers by itself.
 
@@ -18,18 +20,27 @@ import subprocess
 from html import escape
 from pathlib import Path
 
-from . import paths
+from . import apps, paths
 from .fsutil import remove, write_if_changed
+from .settings import BY_KEY
 from .state import State
 
 # Launchers that get a wrapper when present in /usr/bin.
 APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
         "microsoft-edge-stable", "spotify", "discord")
-WRAPPER_MARK = "fontlab launch wrapper"
+WRAPPER_MARK = apps.WRAPPER_MARK
 
 
-def text_conf(state: State) -> str:
+def text_conf(state: State) -> str | None:
+    """None when contrast and gamma are Chromium's own values: nothing to add."""
+    if state["contrast"] == BY_KEY["contrast"].default and state["gamma"] == BY_KEY["gamma"].default:
+        return None
     return f"CONTRAST={state['contrast']}\nGAMMA={state['gamma']}\n"
+
+
+def needs_launcher(state: State) -> bool:
+    """Whether Chromium-based apps must start through fontlab (text flags or Windows fonts)."""
+    return text_conf(state) is not None or state["web_fonts"] == "windows"
 
 
 def private_fonts_conf() -> str:
@@ -71,7 +82,8 @@ def wrapped_apps() -> dict[str, bool]:
 def apply(state: State) -> bool:
     """Returns True when something changed."""
     p = paths.P
-    changed = write_if_changed(p.chromium_text_conf, text_conf(state))
+    text = text_conf(state)
+    changed = write_if_changed(p.chromium_text_conf, text) if text else remove(p.chromium_text_conf)
     if state["web_fonts"] == "windows":
         if write_if_changed(p.chromium_fonts_conf, private_fonts_conf()):
             changed = True
@@ -79,4 +91,5 @@ def apply(state: State) -> bool:
             subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
     else:
         changed |= remove(p.chromium_fonts_conf)
+    changed |= apps.apply(needs_launcher(state))
     return changed

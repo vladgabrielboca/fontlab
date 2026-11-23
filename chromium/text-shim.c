@@ -1,4 +1,4 @@
-// LD_PRELOAD shim for Chromium/Brave: add --text-contrast/--text-gamma to renderer
+// LD_PRELOAD shim for Chromium-based apps (browsers, Electron, CEF): add --text-contrast/--text-gamma to renderer
 // fork requests sent from the browser process to the zygote. Chromium does not
 // forward these Skia switches to renderers. Renderers stay zygote-forked and sandboxed.
 // Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab.
@@ -37,15 +37,27 @@ static void load_conf(void) {
   have_extra = 1;
 }
 
-// In the real browser binary (/usr/lib/... or /opt/...), drop this .so from LD_PRELOAD
-// so zygote, GPU, renderers and anything the browser opens do not load it.
-// The launcher (/usr/bin/chromium, or bash for brave-origin) keeps it so it reaches the browser.
+// Launchers (shell scripts, /usr/bin/chromium, AppImage runtimes) pass this .so on in
+// LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps the hook but
+// drops the .so from LD_PRELOAD, so zygote, GPU, renderers and anything the app opens
+// (a terminal inside an editor, say) do not load it.
+static int file_in_dir(const char *dir, const char *name) {
+  char p[1024];
+  snprintf(p, sizeof p, "%s/%s", dir, name);
+  return access(p, F_OK) == 0;
+}
+
 __attribute__((constructor)) static void shim_init(void) {
   char exe[512];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
   if (n <= 0) return;
   exe[n] = 0;
-  if (strncmp(exe, "/usr/lib/", 9) && strncmp(exe, "/opt/", 5)) return;
+  char *slash = strrchr(exe, '/');
+  if (!slash) return;
+  *slash = 0;
+  int chromium = file_in_dir(exe, "icudtl.dat") &&
+                 (file_in_dir(exe, "resources.pak") || file_in_dir(exe, "v8_context_snapshot.bin"));
+  if (!chromium) return;
   const char *lp = getenv("LD_PRELOAD");
   if (!lp) return;
   char keep[4096] = "", item[1024];
