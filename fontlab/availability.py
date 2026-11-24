@@ -15,7 +15,7 @@ from .packages import BY_ID, Manifest
 from .settings import BY_KEY, Setting
 from .state import State
 
-WEIGHT_PACKAGES = {"ui_weight": ("inter", "adwaita", "googlesans", "roboto"),
+WEIGHT_PACKAGES = {"ui_weight": ("inter", "adwaita", "roboto"),
                    "mono_weight": ("jbm",), "sf_weight": ("sf",)}
 CHOICE_PACKAGES = {("web_fonts", "inter"): "inter", ("web_fonts", "sf"): "sf",
                    ("web_fonts", "windows"): "windows"}

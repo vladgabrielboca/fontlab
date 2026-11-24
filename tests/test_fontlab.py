@@ -158,20 +158,21 @@ class FontsTest(TempHome):
         for d in dirs:
             self.assertNotEqual(d.stat().st_mtime_ns // 10**9, before[d], d)
 
-    def test_google_sans_and_roboto_follow_weight_and_darkening(self) -> None:
+    def test_roboto_follows_weight_and_darkening_google_sans_stays_stock(self) -> None:
         self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "googlesans"))
         self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "roboto"))
-        self.fake_package("googlesans", {"400": ["GoogleSansFlex-Regular.ttf", "GoogleSansFlex-Bold.ttf"],
-                                         "450": ["GoogleSansFlex-Regular.ttf"]})
+        self.fake_package("googlesans", {"400": ["GoogleSansFlex.ttf"]})
         self.fake_package("roboto", {"400": ["Roboto-Regular.ttf", "Roboto-Bold.ttf"],
                                      "450": ["Roboto-Regular.ttf"]})
         st = dict(DEFAULTS, ui_weight="450", darkening="0.50")
         sets = fonts.plan(st)
-        for pid, reg in (("googlesans", "GoogleSansFlex-Regular.ttf"), ("roboto", "Roboto-Regular.ttf")):
-            fs = next(fs for fs in sets if fs.family.package == pid)
-            self.assertEqual(fs.darken, 0.5)
-            self.assertTrue(any(p.name == reg and p.parent.name == "450" for p in fs.sources))
-            self.assertTrue(fonts.installed(sets, pid))
+        rob = next(fs for fs in sets if fs.family.package == "roboto")
+        self.assertEqual(rob.darken, 0.5)
+        self.assertTrue(any(p.name == "Roboto-Regular.ttf" and p.parent.name == "450" for p in rob.sources))
+        gs = next(fs for fs in sets if fs.family.package == "googlesans")
+        self.assertEqual(gs.darken, 0.0)
+        self.assertEqual([p.parent.name for p in gs.sources], ["400"])
+        self.assertTrue(fonts.installed(sets, "googlesans"))
 
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
