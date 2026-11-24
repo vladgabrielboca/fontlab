@@ -80,6 +80,7 @@ a new terminal window for terminal fonts.
 | mono_weight | weight of JetBrains Mono |
 | sf_weight | weight of SF Pro Text |
 | web_fonts | the font web pages get when they ask for `sans-serif` or Arial: system, inter, sf or windows |
+| vencord_fonts | `on` (default) makes Vesktop and other Vencord clients use your `sans-serif` and `monospace` instead of Discord's own font, gg sans, so the settings above reach Discord. `off` removes it. Restart the client after changing it |
 | contrast, gamma | text contrast and gamma in every Chromium and Electron app. Higher gamma makes light text on dark backgrounds heavier. The defaults, 0.2 and 1.2, are Chromium's own values |
 | freetype_darkening | FreeType's own darkening for GTK and Qt apps: `off`, `cff`, `all`, or `strong`. `strong` uses [lucidglyph](https://github.com/maximilionus/lucidglyph)'s values, which keep the darkening on for bigger text. It needs sudo and a new login. The default, `keep`, leaves your system alone |
 | qt_no_synth_bold | sets `QT_NO_SYNTHESIZED_BOLD=1`, for Qt versions that draw bold variable fonts too heavy. Same sudo and login rules as above |
@@ -117,6 +118,7 @@ fontlab keeps your choices in `~/.config/fontlab/state.toml`. From that file it 
 - fontconfig rules in `~/.config/fontconfig/conf.d/70-fontlab-render.conf` and `71-fontlab-web.conf`
 - GNOME's font settings, if your desktop has them
 - `/etc/environment`, only if you change `freetype_darkening` or `qt_no_synth_bold`
+- a marked block in Vencord's `quickCss.css` (Vesktop, Vencord, Equibop), only for clients you have installed. The rest of the file stays yours
 - app launcher entries for Chromium and Electron apps, only if you change contrast or gamma (see below)
 
 It never edits files in `/usr/share`. To hide a system font it replaces, it uses a

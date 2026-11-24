@@ -10,7 +10,7 @@ from pathlib import Path
 
 import os
 
-from fontlab import apps, chromium, desktop, fontconfig, fonts, paths
+from fontlab import apps, chromium, desktop, fontconfig, fonts, paths, vencord
 from fontlab import state as statefile
 from fontlab.availability import Context
 from fontlab.packages import BY_ID, Manifest, WindowsFonts
@@ -414,6 +414,29 @@ class AppsTest(TempHome):
         self.assertEqual((paths.P.desktop_backup / "mine.desktop").read_text(), new)
         apps.apply(False)
         self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), new)
+
+
+class VencordTest(TempHome):
+    def test_block_added_and_removed_keeping_user_css(self) -> None:
+        css = self.home / ".config/vesktop/settings/quickCss.css"
+        css.parent.mkdir(parents=True)
+        css.write_text(".mine { color: red; }\n")
+        self.assertTrue(vencord.apply({"vencord_fonts": "on"}))
+        self.assertIn("--font-primary: sans-serif", css.read_text())
+        self.assertIn(".mine", css.read_text())
+        self.assertFalse(vencord.apply({"vencord_fonts": "on"}))      # no duplicate block
+        self.assertEqual(css.read_text().count("fontlab start"), 1)
+        self.assertTrue(vencord.apply({"vencord_fonts": "off"}))
+        self.assertEqual(css.read_text(), ".mine { color: red; }\n")
+
+    def test_missing_client_is_left_alone(self) -> None:
+        self.assertFalse(vencord.apply({"vencord_fonts": "on"}))
+        self.assertFalse((self.home / ".config/vesktop").exists())
+
+    def test_off_never_creates_a_file(self) -> None:
+        (self.home / ".config/Vencord/settings").mkdir(parents=True)
+        self.assertFalse(vencord.apply({"vencord_fonts": "off"}))
+        self.assertFalse((self.home / ".config/Vencord/settings/quickCss.css").exists())
 
 
 class EnvironmentTest(unittest.TestCase):

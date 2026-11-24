@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-from . import apps, chromium, desktop, fontconfig, fonts, paths
+from . import apps, chromium, desktop, fontconfig, fonts, paths, vencord
 from .availability import Context
 from .fsutil import remove, write_if_changed
 from .state import State
@@ -58,6 +58,10 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     if chromium_changed:
         report.changed.append("chromium")
 
+    progress("vencord")
+    if vencord.apply(state):
+        report.changed.append("vencord")
+
     progress("gsettings")
     if desktop.apply_gsettings(state):
         report.changed.append("gsettings")
@@ -78,6 +82,7 @@ def uninstall(purge: bool = False) -> list[str]:
     p = paths.P
     removed = []
     apps.apply(False)
+    vencord.apply({"vencord_fonts": "off"})
     for f in (p.render_conf, p.web_conf, p.chromium_text_conf, p.chromium_fonts_conf):
         if remove(f):
             removed.append(str(f))

@@ -59,6 +59,10 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("web_fonts", "Fonts", "Web and UI sans font", ("system", "inter", "sf", "windows"), "system",
             "What sans-serif, system-ui, Arial etc. become. system: your distro's choice. "
             "windows: Chromium uses Windows 11 fonts, other apps keep Inter."),
+    Setting("vencord_fonts", "Fonts", "Discord font (Vencord)", ("off", "on"), "on",
+            "Vesktop and other Vencord clients: replace Discord's own font (gg sans) with your "
+            "sans-serif and monospace, so the settings above reach Discord. Uses a marked block in "
+            "Vencord's quickCss.css; off removes it. Restart the client to see it."),
     # Chromium: Skia text contrast and gamma (web pages via the shim, browser UI via wrapper flags).
     # The defaults are Chromium's own Linux values; at the defaults fontlab adds nothing.
     Setting("contrast", "Chromium", "Text contrast", steps(0, 1, 0.1, 1), "0.2",
