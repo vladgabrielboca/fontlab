@@ -157,15 +157,20 @@ class FontsTest(TempHome):
         for d in dirs:
             self.assertNotEqual(d.stat().st_mtime_ns // 10**9, before[d], d)
 
-    def test_google_sans_ignores_weight_and_darkening(self) -> None:
+    def test_google_sans_and_roboto_follow_weight_and_darkening(self) -> None:
         self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "googlesans"))
-        self.fake_package("googlesans", {"400": ["GoogleSansFlex[wght].ttf"]})
+        self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "roboto"))
+        self.fake_package("googlesans", {"400": ["GoogleSansFlex-Regular.ttf", "GoogleSansFlex-Bold.ttf"],
+                                         "450": ["GoogleSansFlex-Regular.ttf"]})
+        self.fake_package("roboto", {"400": ["Roboto-Regular.ttf", "Roboto-Bold.ttf"],
+                                     "450": ["Roboto-Regular.ttf"]})
         st = dict(DEFAULTS, ui_weight="450", darkening="0.50")
         sets = fonts.plan(st)
-        gs = next(fs for fs in sets if fs.family.package == "googlesans")
-        self.assertEqual(gs.darken, 0.0)
-        self.assertEqual([p.name for p in gs.sources], ["GoogleSansFlex[wght].ttf"])
-        self.assertTrue(fonts.installed(sets, "googlesans"))
+        for pid, reg in (("googlesans", "GoogleSansFlex-Regular.ttf"), ("roboto", "Roboto-Regular.ttf")):
+            fs = next(fs for fs in sets if fs.family.package == pid)
+            self.assertEqual(fs.darken, 0.5)
+            self.assertTrue(any(p.name == reg and p.parent.name == "450" for p in fs.sources))
+            self.assertTrue(fonts.installed(sets, pid))
 
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
@@ -222,6 +227,9 @@ class FontconfigTest(TempHome):
     def test_web_conf(self) -> None:
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS), inter_available=True))
         self.assertIn("<string>Inter</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True))
+        self.assertIn("<string>Roboto</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True))
+        self.assertNotIn("<string>Roboto</string>",
+                         fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True, roboto=True))
         self.assertIn("SF Pro Display", fontconfig.web_conf(dict(DEFAULTS, web_fonts="sf"), True))
         # windows: other apps keep Inter when it is installed, else the system default
         self.assertIn("<string>Inter</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="windows"), True))

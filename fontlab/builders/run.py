@@ -4,6 +4,8 @@ so nothing here imports fontlab. Commands:
   run.py darken                       jobs on stdin, one per line: SRC<TAB>DST<TAB>XEM<TAB>YEM
   run.py inter RELEASE_DIR OUT W...
   run.py adwaita SYSTEM_DIR OUT W...
+  run.py google-sans-flex VF_PATH OUT W...
+  run.py roboto REGULAR_VF ITALIC_VF OUT W...
   run.py jetbrains-mono BASE_REGULAR BASE_ITALIC VARIABLE_DIR OUT W...
   run.py sf-pro-text VARIABLE_DIR STATIC_DIR OUT W...
 """
@@ -23,9 +25,11 @@ def main(argv):
             for f in [pool.submit(darken.darken, s, d, float(x), float(y)) for s, d, x, y in jobs]:
                 f.result()
         return
-    nfixed = {"inter": 2, "adwaita": 2, "jetbrains-mono": 4, "sf-pro-text": 3}[cmd]
+    nfixed = {"inter": 2, "adwaita": 2, "google-sans-flex": 2, "roboto": 3,
+              "jetbrains-mono": 4, "sf-pro-text": 3}[cmd]
     fixed, ws = args[:nfixed], [int(w) for w in args[nfixed:]]
     builder = {"inter": weights.inter, "adwaita": weights.adwaita,
+               "google-sans-flex": weights.google_sans_flex, "roboto": weights.roboto,
                "jetbrains-mono": weights.jetbrains_mono, "sf-pro-text": weights.sf_pro_text}[cmd]
     builder(*fixed, ws)
 

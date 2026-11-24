@@ -75,8 +75,8 @@ a new terminal window for terminal fonts.
 | mono_hinting | the same, for monospace fonts in your terminal and editor |
 | lcdfilter | colour filter for subpixel text. Chromium ignores it |
 | small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. GTK apps use it; Chromium and Qt ignore it |
-| darkening | makes Inter and Adwaita Sans thicker the way macOS does it, from 0 to 1 |
-| ui_weight | weight of Inter and Adwaita Sans, from 400 (normal) to 500 |
+| darkening | makes Inter, Adwaita Sans, Google Sans Flex and Roboto thicker the way macOS does it, from 0 to 1 |
+| ui_weight | weight of Inter, Adwaita Sans, Google Sans Flex and Roboto, from 400 (normal) to 500 |
 | mono_weight | weight of JetBrains Mono |
 | sf_weight | weight of SF Pro Text |
 | web_fonts | the font web pages get when they ask for `sans-serif` or Arial: system, inter, sf or windows |
@@ -103,7 +103,8 @@ The repo has no font files in it. fontlab downloads or builds each one on your c
 | Inter | downloaded from github.com/rsms/inter |
 | Adwaita Sans | built from the copy your system already has |
 | JetBrains Mono | downloaded, then built on top of your installed JetBrains Mono or its Nerd Font version, so the icons still work |
-| Google Sans Flex | downloaded from github.com/google/fonts, optional. Google's pages ask for "Google Sans" by name but don't always load it, so without a local copy the same search titles switch between Inter and Google's font. fontlab points "Google Sans", "Google Sans Text" and "Google Sans Display" at it. It stays at its stock weight, with no darkening |
+| Google Sans Flex | downloaded from github.com/google/fonts, optional. Built as static faces with heavier weights and darkening. Google's pages ask for "Google Sans" by name but don't always load it, so without a local copy the same search titles switch between Inter and Google's font. fontlab points "Google Sans", "Google Sans Text" and "Google Sans Display" at it |
+| Roboto | downloaded from github.com/google/fonts, optional. Built as static faces with heavier weights and darkening. When installed, fontlab stops aliasing Roboto to Inter/SF so sites like YouTube keep Roboto (pair with blocking `fonts.gstatic.com/s/roboto/*` in your ad blocker so the local darkened copy is used) |
 | SF Pro | downloaded from Apple, or added from a folder |
 | Windows 11 fonts | copied from a Windows Fonts folder. fontlab looks for mounted Windows drives. Only Chromium apps use them |
 

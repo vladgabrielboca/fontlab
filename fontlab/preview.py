@@ -79,7 +79,8 @@ def compare_setup(state: State) -> tuple[dict[str, str], list[str]]:
                      fontconfig.render_conf(state, [g for fs in sets for g in fs.rejects],
                                            google_sans=fonts.installed(sets, "googlesans")))
     windows = state["web_fonts"] == "windows"
-    web = None if windows else fontconfig.web_conf(state, inter_available=ctx.has("inter"))
+    web = None if windows else fontconfig.web_conf(state, inter_available=ctx.has("inter"),
+                                                   roboto=fonts.installed(sets, "roboto"))
     if web:
         write_if_changed(d / "web.conf", web)
         ours[p.web_conf.name] = d / "web.conf"
