@@ -84,28 +84,6 @@ def adwaita(system_dir, out_dir, weights):
                           400, italic, os.path.join(out_dir, str(w), src))
 
 
-# --- Google Sans Flex ---------------------------------------------------------------
-# One variable file with both upright (slnt=0) and italic (slnt=-10) named instances.
-# Instancing to static faces lets ui_weight and outline darkening reach Google Sans too.
-
-def google_sans_flex(vf_path, out_dir, weights):
-    """<out>/400: all named instances as static files. <out>/<w>: Regular/Italic at w."""
-    meta = TTFont(vf_path)
-    for inst in meta["fvar"].instances:
-        style = meta["name"].getDebugName(inst.subfamilyNameID)
-        loc = dict(inst.coordinates)
-        italic = loc.get("slnt", 0.0) < 0 or "Italic" in style
-        f = instantiateVariableFont(TTFont(vf_path), loc)
-        _static_names(f, "Google Sans Flex", "GoogleSansFlex", style, int(round(loc["wght"])),
-                      italic, os.path.join(out_dir, "400", f"GoogleSansFlex-{style.replace(' ', '')}.ttf"))
-    for w in weights:
-        for style, slnt, italic in (("Regular", 0.0, False), ("Italic", -10.0, True)):
-            f = instantiateVariableFont(TTFont(vf_path),
-                                        {"wght": w, "opsz": 18.0, "wdth": 100.0, "ROND": 0.0, "slnt": slnt})
-            _static_names(f, "Google Sans Flex", "GoogleSansFlex", style, 400, italic,
-                          os.path.join(out_dir, str(w), f"GoogleSansFlex-{style}.ttf"))
-
-
 # --- Roboto -------------------------------------------------------------------------
 # Normal-width (wdth=100) named instances as static files, plus heavier Regular/Italic.
 

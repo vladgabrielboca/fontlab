@@ -187,8 +187,8 @@ class JetBrainsMono(Package):
 
 class GoogleSansFlex(Package):
     id, name = "googlesans", "Google Sans Flex"
-    summary = ("Fills in for Google Sans when Google's pages don't load it (search titles), "
-               "with heavier weights and darkening. Downloaded from github.com/google/fonts.")
+    summary = ("Fills in for Google Sans when Google's pages don't load it (search titles). "
+               "Stock weight. Downloaded from github.com/google/fonts.")
     optional = True
     COMMIT = "fa826bb2a3e26df8c1bee99351fc0d039aeed7d2"
     BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/googlesansflex"
@@ -199,11 +199,13 @@ class GoogleSansFlex(Package):
     OFL_SHA256 = "fc13d69f63e36d284b6e383d4d1463d8ad404f0aa065e57cf961252d51063137"
 
     def build(self, stage, work, progress, folder):
-        vf = fetch(self.URL, work / self.FONT, progress, self.SHA256)
+        # One variable font, shipped as is. Its named instances match Google's web font,
+        # so a fresh load (local copy) and an in-page load (web font) look the same.
+        # Weight and darkening are left out on purpose: Google's web font is always stock.
+        (stage / "400").mkdir()
+        fetch(self.URL, stage / "400" / self.FONT, progress, self.SHA256)
         fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
-        progress("building Google Sans Flex static family")
-        run_builder(["google-sans-flex", str(vf), str(stage), *WEIGHTS])
-        return Manifest("5.000-static " + self.COMMIT[:7], ["400", *WEIGHTS])
+        return Manifest("5.000 " + self.COMMIT[:7])
 
 
 class Roboto(Package):
