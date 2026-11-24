@@ -1,12 +1,16 @@
-// LD_PRELOAD shim for Chromium-based apps (browsers, Electron, CEF): add --text-contrast/--text-gamma to renderer
-// fork requests sent from the browser process to the zygote. Chromium does not
-// forward these Skia switches to renderers. Renderers stay zygote-forked and sandboxed.
+// LD_PRELOAD shim for Chromium-based apps (browsers, Electron, CEF): add --text-contrast/--text-gamma to
+// renderers. Chromium does not forward these Skia switches to renderers. Two launch paths:
+//  - zygote (browsers, most Electron apps): rewrite the fork request the browser sends to the
+//    zygote. Renderers stay zygote-forked and sandboxed.
+//  - no zygote (Discord and other apps run with --no-sandbox --no-zygote): the browser forks and
+//    execs the renderer itself, so hook exec* and append the switches to its argv.
 // Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab,
 // or the file in $FONTLAB_TEXT_CONF (the preset comparison window). Missing file = no change.
 // Fork message (base::Pickle): u32 payload_size | i32 cmd | str process_type | i32 argc | argc x str | rest
 // str = i32 len + bytes, padded to 4.
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,6 +64,7 @@ __attribute__((constructor)) static void shim_init(void) {
   int chromium = file_in_dir(exe, "icudtl.dat") &&
                  (file_in_dir(exe, "resources.pak") || file_in_dir(exe, "v8_context_snapshot.bin"));
   if (!chromium) return;
+  load_conf();   // now, not after fork: fopen allocates, a forked child must not
   const char *lp = getenv("LD_PRELOAD");
   if (!lp) return;
   char keep[4096] = "", item[1024];
@@ -135,4 +140,68 @@ ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
   free(o);
   if (r == (ssize_t)(len + add)) return (ssize_t)len;
   return r < 0 ? r : -1;
+}
+
+// ---- no-zygote path: renderers exec'd straight from the browser process ----
+// Runs in the forked child between fork and exec, so no allocation: argv is copied to the stack.
+
+#define MAX_ARGS 1024
+
+static int needs_flags(char *const argv[]) {
+  if (have_extra != 1 || !argv) return 0;
+  int renderer = 0;
+  for (int i = 0; argv[i]; i++) {
+    if (i >= MAX_ARGS - 3) return 0;
+    if (!strcmp(argv[i], "--type=renderer")) renderer = 1;
+    if (!strncmp(argv[i], "--text-contrast", 15)) return 0;
+  }
+  return renderer;
+}
+
+static void with_flags(char *const argv[], char *out[]) {
+  int n = 0;
+  for (; argv[n]; n++) out[n] = argv[n];
+  out[n++] = extra[0];
+  out[n++] = extra[1];
+  out[n] = NULL;
+}
+
+#define REAL(name) \
+  static __typeof__(name) *real_##name; \
+  if (!real_##name) real_##name = (__typeof__(name) *)dlsym(RTLD_NEXT, #name)
+
+int execve(const char *path, char *const argv[], char *const envp[]) {
+  REAL(execve);
+  if (!needs_flags(argv)) return real_execve(path, argv, envp);
+  char *a[MAX_ARGS]; with_flags(argv, a);
+  return real_execve(path, a, envp);
+}
+
+int execv(const char *path, char *const argv[]) {
+  REAL(execv);
+  if (!needs_flags(argv)) return real_execv(path, argv);
+  char *a[MAX_ARGS]; with_flags(argv, a);
+  return real_execv(path, a);
+}
+
+int execvp(const char *file, char *const argv[]) {
+  REAL(execvp);
+  if (!needs_flags(argv)) return real_execvp(file, argv);
+  char *a[MAX_ARGS]; with_flags(argv, a);
+  return real_execvp(file, a);
+}
+
+int execvpe(const char *file, char *const argv[], char *const envp[]) {
+  REAL(execvpe);
+  if (!needs_flags(argv)) return real_execvpe(file, argv, envp);
+  char *a[MAX_ARGS]; with_flags(argv, a);
+  return real_execvpe(file, a, envp);
+}
+
+int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa,
+                const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
+  REAL(posix_spawn);
+  if (!needs_flags(argv)) return real_posix_spawn(pid, path, fa, at, argv, envp);
+  char *a[MAX_ARGS]; with_flags(argv, a);
+  return real_posix_spawn(pid, path, fa, at, a, envp);
 }
