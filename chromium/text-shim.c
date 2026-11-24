@@ -1,9 +1,12 @@
-// LD_PRELOAD shim for Chromium-based apps (browsers, Electron, CEF): add --text-contrast/--text-gamma to
-// renderers. Chromium does not forward these Skia switches to renderers. Two launch paths:
-//  - zygote (browsers, most Electron apps): rewrite the fork request the browser sends to the
-//    zygote. Renderers stay zygote-forked and sandboxed.
-//  - no zygote (Discord and other apps run with --no-sandbox --no-zygote): the browser forks and
-//    execs the renderer itself, so hook exec* and append the switches to its argv.
+// LD_PRELOAD shim for Chromium-family apps (browsers, Electron, CEF, AppImages):
+//  - injects --text-contrast/--text-gamma into renderers (Chromium does not forward these
+//    Skia switches to renderers), via both the zygote fork socket and no-zygote exec*.
+//  - sets FONTCONFIG_FILE to ~/.config/fontlab/chromium-fonts.conf (when present and not
+//    already set), so CSS system-ui and Windows web fonts work even when an app is launched
+//    from a keybind or terminal instead of a wrapper.
+// Safe to load session-wide via LD_PRELOAD: non-Chromium processes exit shim_init() after
+// a single access() check and hit a one-branch fast path in every hooked call. All real_*
+// symbols are resolved eagerly at load time so forked children never call dlsym().
 // Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab,
 // or the file in $FONTLAB_TEXT_CONF (the preset comparison window). Missing file = no change.
 // Fork message (base::Pickle): u32 payload_size | i32 cmd | str process_type | i32 argc | argc x str | rest
@@ -19,8 +22,15 @@
 #include <unistd.h>
 
 static ssize_t (*real_sendmsg)(int, const struct msghdr *, int);
+static int (*real_execve)(const char *, char *const[], char *const[]);
+static int (*real_execv)(const char *, char *const[]);
+static int (*real_execvp)(const char *, char *const[]);
+static int (*real_execvpe)(const char *, char *const[], char *const[]);
+static int (*real_posix_spawn)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                               const posix_spawnattr_t *, char *const[], char *const[]);
 static char extra[2][64];
-static int have_extra = -1;
+static int have_extra = 0;
+static int is_chromium = 0;
 
 static void load_conf(void) {
   have_extra = 0;
@@ -43,10 +53,21 @@ static void load_conf(void) {
   have_extra = 1;
 }
 
-// Launchers (shell scripts, /usr/bin/chromium, AppImage runtimes) pass this .so on in
-// LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps the hook but
-// drops the .so from LD_PRELOAD, so zygote, GPU, renderers and anything the app opens
-// (a terminal inside an editor, say) do not load it.
+static void load_fontconfig(void) {
+  if (getenv("FONTCONFIG_FILE")) return;
+  const char *home = getenv("HOME");
+  if (!home || !*home) return;
+  char path[512];
+  int n = snprintf(path, sizeof path, "%s/.config/fontlab/chromium-fonts.conf", home);
+  if (n > 0 && (size_t)n < sizeof path && access(path, R_OK) == 0) {
+    setenv("FONTCONFIG_FILE", path, 0);
+  }
+}
+
+// Launchers (shell scripts, /usr/bin/chromium, AppImage runtimes, session LD_PRELOAD) pass
+// this .so on in LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps
+// the hook, sets FONTCONFIG_FILE if needed, and drops the .so from LD_PRELOAD, so zygote,
+// GPU, renderers and anything the app opens (a terminal inside an editor, say) do not load it.
 static int file_in_dir(const char *dir, const char *name) {
   char p[1024];
   snprintf(p, sizeof p, "%s/%s", dir, name);
@@ -54,6 +75,15 @@ static int file_in_dir(const char *dir, const char *name) {
 }
 
 __attribute__((constructor)) static void shim_init(void) {
+  // Resolve all wrapped libc functions up front (single-threaded) so forked children never
+  // call dlsym() between fork() and exec*().
+  real_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
+  real_execve = dlsym(RTLD_NEXT, "execve");
+  real_execv = dlsym(RTLD_NEXT, "execv");
+  real_execvp = dlsym(RTLD_NEXT, "execvp");
+  real_execvpe = dlsym(RTLD_NEXT, "execvpe");
+  real_posix_spawn = dlsym(RTLD_NEXT, "posix_spawn");
+
   char exe[512];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
   if (n <= 0) return;
@@ -64,7 +94,9 @@ __attribute__((constructor)) static void shim_init(void) {
   int chromium = file_in_dir(exe, "icudtl.dat") &&
                  (file_in_dir(exe, "resources.pak") || file_in_dir(exe, "v8_context_snapshot.bin"));
   if (!chromium) return;
+  is_chromium = 1;
   load_conf();   // now, not after fork: fopen allocates, a forked child must not
+  load_fontconfig();
   const char *lp = getenv("LD_PRELOAD");
   if (!lp) return;
   char keep[4096] = "", item[1024];
@@ -105,7 +137,8 @@ static size_t put_str(uint8_t *o, const char *s) {
 
 ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
   if (!real_sendmsg) real_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
-  if (!m || m->msg_iovlen != 1 || m->msg_iov[0].iov_len < 32) return real_sendmsg(fd, m, flags);
+  if (!is_chromium || !have_extra || !m || m->msg_iovlen != 1 || m->msg_iov[0].iov_len < 32)
+    return real_sendmsg(fd, m, flags);
   const uint8_t *b = m->msg_iov[0].iov_base;
   size_t len = m->msg_iov[0].iov_len;
   uint32_t payload; memcpy(&payload, b, 4);
@@ -113,8 +146,7 @@ ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
   const char *pt; int32_t ptlen;
   size_t off = skip_str(b, len, 8, &pt, &ptlen);  // after header + cmd
   if (!off || ptlen != 8 || memcmp(pt, "renderer", 8)) return real_sendmsg(fd, m, flags);
-  if (have_extra < 0) load_conf();
-  if (have_extra != 1 || off + 4 > len) return real_sendmsg(fd, m, flags);
+  if (off + 4 > len) return real_sendmsg(fd, m, flags);
   int32_t argc; memcpy(&argc, b + off, 4);
   if (argc < 1 || argc > 4096) return real_sendmsg(fd, m, flags);
   size_t argc_off = off, p = off + 4;
@@ -148,7 +180,7 @@ ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
 #define MAX_ARGS 1024
 
 static int needs_flags(char *const argv[]) {
-  if (have_extra != 1 || !argv) return 0;
+  if (!is_chromium || !have_extra || !argv) return 0;
   int renderer = 0;
   for (int i = 0; argv[i]; i++) {
     if (i >= MAX_ARGS - 3) return 0;
@@ -166,33 +198,32 @@ static void with_flags(char *const argv[], char *out[]) {
   out[n] = NULL;
 }
 
-#define REAL(name) \
-  static __typeof__(name) *real_##name; \
+#define ENSURE(name) \
   if (!real_##name) real_##name = (__typeof__(name) *)dlsym(RTLD_NEXT, #name)
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
-  REAL(execve);
+  ENSURE(execve);
   if (!needs_flags(argv)) return real_execve(path, argv, envp);
   char *a[MAX_ARGS]; with_flags(argv, a);
   return real_execve(path, a, envp);
 }
 
 int execv(const char *path, char *const argv[]) {
-  REAL(execv);
+  ENSURE(execv);
   if (!needs_flags(argv)) return real_execv(path, argv);
   char *a[MAX_ARGS]; with_flags(argv, a);
   return real_execv(path, a);
 }
 
 int execvp(const char *file, char *const argv[]) {
-  REAL(execvp);
+  ENSURE(execvp);
   if (!needs_flags(argv)) return real_execvp(file, argv);
   char *a[MAX_ARGS]; with_flags(argv, a);
   return real_execvp(file, a);
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
-  REAL(execvpe);
+  ENSURE(execvpe);
   if (!needs_flags(argv)) return real_execvpe(file, argv, envp);
   char *a[MAX_ARGS]; with_flags(argv, a);
   return real_execvpe(file, a, envp);
@@ -200,7 +231,7 @@ int execvpe(const char *file, char *const argv[], char *const envp[]) {
 
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa,
                 const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
-  REAL(posix_spawn);
+  ENSURE(posix_spawn);
   if (!needs_flags(argv)) return real_posix_spawn(pid, path, fa, at, argv, envp);
   char *a[MAX_ARGS]; with_flags(argv, a);
   return real_posix_spawn(pid, path, fa, at, a, envp);

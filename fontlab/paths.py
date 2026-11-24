@@ -73,6 +73,18 @@ class Paths:
         return self.config_dir / "chromium-fonts.conf"
 
     @property
+    def session_env_conf(self) -> Path:
+        """uwsm's env file, sourced at every login before the compositor starts. fontlab owns
+        one marked block in it that adds the shim to LD_PRELOAD (see chromium.py)."""
+        return self.home / ".config/uwsm/env"
+
+    @property
+    def old_session_env_conf(self) -> Path:
+        """Earlier location of the session LD_PRELOAD (environment.d); removed on apply.
+        systemd reads it only when the user manager starts, which a logout does not do."""
+        return self.home / ".config/environment.d/90-fontlab.conf"
+
+    @property
     def runtime_dir(self) -> Path:
         """Shim library and chromium-env.sh, installed by install.sh."""
         return self.home / ".local/share/fontlab/runtime"

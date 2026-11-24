@@ -54,10 +54,17 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
         report.notices.append(desktop.SHELL_NOTICE)
 
     progress("chromium")
-    # Without the shim, undo any app wrapping so no desktop entry points at a missing launcher.
-    chromium_changed = chromium.apply(state) if ctx.shim else apps.apply(False)
+    # Without the shim, undo any app wrapping and remove the session LD_PRELOAD drop-in so no
+    # launcher or session points at a missing .so.
+    had_session_env = chromium.session_env_enabled()
+    if ctx.shim:
+        chromium_changed = chromium.apply(state)
+    else:
+        chromium_changed = chromium.apply_session_env({"session_shim": "off"}) | apps.apply(False)
     if chromium_changed:
         report.changed.append("chromium")
+    if chromium.session_env_enabled() != had_session_env:
+        report.notices.append("session shim changed: log out and back in so your desktop picks it up")
 
     progress("vencord")
     if vencord.apply(state):
@@ -83,8 +90,10 @@ def uninstall(purge: bool = False) -> list[str]:
     p = paths.P
     removed = []
     apps.apply(False)
+    if chromium.apply_session_env({"session_shim": "off"}):
+        removed.append(f"fontlab block in {p.session_env_conf}")
     vencord.apply({"vencord_fonts": "off"})
-    for f in (p.render_conf, p.web_conf, p.chromium_text_conf, p.chromium_fonts_conf):
+    for f in (p.render_conf, p.web_conf, p.chromium_text_conf, p.chromium_fonts_conf, p.old_session_env_conf):
         if remove(f):
             removed.append(str(f))
     if p.installed_fonts.exists():

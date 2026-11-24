@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 import os
+import subprocess
 
 from fontlab import apps, chromium, desktop, fontconfig, fonts, paths, vencord
 from fontlab import state as statefile
@@ -278,6 +279,42 @@ class ChromiumTest(TempHome):
         self.assertIn("web-windows.conf", xml)
         self.assertIn(str(paths.P.render_conf), xml)
         self.assertIn(str(paths.P.windows_fonts), xml)
+
+    def test_session_shim_env_drop_in(self) -> None:
+        conf = paths.P.session_env_conf
+        self.assertIsNone(chromium.session_env_text(dict(DEFAULTS)))
+        self.assertFalse(chromium.apply_session_env(dict(DEFAULTS)))
+        self.assertFalse(conf.exists())
+        paths.P.old_session_env_conf.parent.mkdir(parents=True)
+        paths.P.old_session_env_conf.write_text("LD_PRELOAD=x\n")
+        conf.parent.mkdir(parents=True)
+        conf.write_text("export FOO=1\n")
+        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="on")))
+        self.assertFalse(paths.P.old_session_env_conf.exists())
+        text = conf.read_text()
+        self.assertTrue(text.startswith("export FOO=1\n"))
+        self.assertIn("fontlab-text-shim.so", text)
+        self.assertTrue(chromium.session_env_enabled())
+        self.assertFalse(chromium.apply_session_env(dict(DEFAULTS, session_shim="on")))
+        # The block adds the shim once, also when LD_PRELOAD already has it.
+        shim = str(paths.P.runtime_dir / "fontlab-text-shim.so")
+        for before, after in (("", shim), ("/o.so", f"{shim}:/o.so"), (f"{shim}:/o.so", f"{shim}:/o.so")):
+            env = {"PATH": os.environ["PATH"]} | ({"LD_PRELOAD": before} if before else {})
+            out = subprocess.run(["sh", "-c", f'. "{conf}"; printf %s "$LD_PRELOAD"'],
+                                 env=env, capture_output=True, text=True, check=True).stdout
+            self.assertEqual(out, after)
+        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="off")))
+        self.assertEqual(conf.read_text(), "export FOO=1\n")
+        self.assertFalse(chromium.session_env_enabled())
+        conf.write_text("")
+        chromium.apply_session_env(dict(DEFAULTS, session_shim="on"))
+        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="off")))
+        self.assertFalse(conf.exists())
+        self.assertEqual(chromium.merged_ld_preload(None, "/a/fontlab-text-shim.so"), "/a/fontlab-text-shim.so")
+        self.assertEqual(chromium.merged_ld_preload("/other.so", "/a/fontlab-text-shim.so"),
+                         "/a/fontlab-text-shim.so:/other.so")
+        self.assertEqual(chromium.merged_ld_preload("/a/fontlab-text-shim.so:/other.so", None), "/other.so")
+        self.assertIsNone(chromium.merged_ld_preload("/a/fontlab-text-shim.so", None))
 
 
 class CompareTest(TempHome):

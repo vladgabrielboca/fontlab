@@ -177,12 +177,17 @@ def cmd_doctor(_args) -> None:
     line(ctx.shim, f"Chromium shim in {paths.P.runtime_dir} (install.sh)")
     for app, active in chromium.wrapped_apps().items():
         line(active, f"wrapper for {app}" + ("" if active else ": not active, run install.sh"))
-    if chromium.needs_launcher(statefile.load()):
+    st = statefile.load()
+    if chromium.needs_launcher(st):
         line(ctx.shim and apps.wrapped_count() > 0,
              f"{apps.wrapped_count()} app launcher entries start through fontlab (fontlab apps)")
+    if st["session_shim"] == "on":
+        active = chromium.session_shim_active()
+        line(active, "session-wide shim active in this login"
+             if active else "session-wide shim enabled in ~/.config/uwsm/env: log out and back in")
     for p in PACKAGES:
         line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
-    line(not desktop.environment_pending(statefile.load()),
+    line(not desktop.environment_pending(st),
          "/etc/environment matches the state")
 
 

@@ -139,6 +139,124 @@ def wrapped_apps() -> dict[str, bool]:
     return out
 
 
+SESSION_START = "# fontlab start: session-wide Chromium shim. Turn off with: fontlab set session_shim=off"
+SESSION_END = "# fontlab end"
+_SESSION_BLOCK = re.compile(r"\n?# fontlab start[^\n]*\n.*?# fontlab end\n?", re.S)
+
+
+def session_env_text(state: State) -> str | None:
+    """fontlab's block for ~/.config/uwsm/env, or None when off. The shim goes first in
+    LD_PRELOAD, once: the systemd user manager may already carry it from an earlier login
+    or from sync_systemd_session_env."""
+    if state.get("session_shim") != "on":
+        return None
+    shim = paths.P.runtime_dir / "fontlab-text-shim.so"
+    return (f"{SESSION_START}\n"
+            f'case ":${{LD_PRELOAD-}}:" in\n'
+            f"  *:{shim}:*) ;;\n"
+            f'  *) export LD_PRELOAD="{shim}${{LD_PRELOAD:+:$LD_PRELOAD}}" ;;\n'
+            f"esac\n"
+            f"{SESSION_END}\n")
+
+
+def with_session_block(text: str, block: str | None) -> str:
+    """text with fontlab's block replaced by block (None removes it); the rest is kept."""
+    rest = _SESSION_BLOCK.sub("\n", text).strip("\n")
+    if block is None:
+        return rest + "\n" if rest else ""
+    return f"{rest}\n\n{block}" if rest else block
+
+
+def _systemd_ld_preload() -> str | None:
+    if not shutil.which("systemctl"):
+        return None
+    r = subprocess.run(["systemctl", "--user", "show-environment"],
+                       capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        return None
+    for ln in r.stdout.splitlines():
+        if ln.startswith("LD_PRELOAD="):
+            val = ln.split("=", 1)[1]
+            # systemctl --user show-environment uses $'...' shell quoting for some values.
+            if val.startswith("$'") and val.endswith("'"):
+                val = val[2:-1]
+            return val
+    return ""
+
+
+def merged_ld_preload(current: str | None, shim: str | None) -> str | None:
+    """LD_PRELOAD with fontlab's shim added (shim != None) or removed, keeping other entries."""
+    items = [p for p in (current or "").split(":") if p and "fontlab-text-shim.so" not in p]
+    if shim:
+        items.insert(0, shim)
+    return ":".join(items) or None
+
+
+def sync_systemd_session_env(enabled: bool) -> bool:
+    """Update the running systemd --user environment so UWSM/systemd-launched apps pick up
+    LD_PRELOAD right away (systemd --user often stays alive across quick logouts).
+    Skipped under fake test homes."""
+    if paths.P.home != Path.home():
+        return False
+    cur = _systemd_ld_preload()
+    if cur is None:
+        return False
+    shim = str(paths.P.runtime_dir / "fontlab-text-shim.so") if enabled else None
+    want = merged_ld_preload(cur, shim)
+    if (cur or None) == want:
+        return False
+    cmd = ["systemctl", "--user", "set-environment", f"LD_PRELOAD={want}"] if want \
+        else ["systemctl", "--user", "unset-environment", "LD_PRELOAD"]
+    return subprocess.run(cmd, capture_output=True, check=False).returncode == 0
+
+
+def _compositor_has_shim() -> bool:
+    """Check whether the running graphical compositor (e.g. Hyprland) inherited LD_PRELOAD,
+    so fontlab doctor still works accurately even when run inside a Chromium-based terminal
+    where the shim already stripped itself from LD_PRELOAD."""
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return False
+    r = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "Hyprland"],
+                       capture_output=True, text=True, check=False)
+    for pid in r.stdout.split():
+        try:
+            env = Path(f"/proc/{pid}/environ").read_bytes().decode("utf-8", "replace")
+        except OSError:
+            continue
+        if any(e.startswith("LD_PRELOAD=") and "fontlab-text-shim.so" in e for e in env.split("\0")):
+            return True
+    return False
+
+
+def session_shim_active() -> bool:
+    """Whether the session-wide shim is active in the current graphical session."""
+    return "fontlab-text-shim.so" in os.environ.get("LD_PRELOAD", "") or _compositor_has_shim()
+
+
+def apply_session_env(state: State) -> bool:
+    """Add or remove fontlab's block in ~/.config/uwsm/env and sync systemd --user.
+    Returns True when something changed."""
+    p = paths.P.session_env_conf
+    block = session_env_text(state)
+    old = p.read_text() if p.exists() else ""
+    new = with_session_block(old, block)
+    if new == old:
+        changed = False
+    elif new:
+        changed = write_if_changed(p, new)
+    else:
+        changed = remove(p)
+    changed |= remove(paths.P.old_session_env_conf)
+    changed |= sync_systemd_session_env(block is not None)
+    return changed
+
+
+def session_env_enabled() -> bool:
+    """Whether ~/.config/uwsm/env holds fontlab's block."""
+    p = paths.P.session_env_conf
+    return p.exists() and SESSION_START in p.read_text()
+
+
 def apply(state: State) -> bool:
     """Returns True when something changed."""
     p = paths.P
@@ -152,5 +270,6 @@ def apply(state: State) -> bool:
         if state["web_fonts"] == "windows":
             env = dict(os.environ, FONTCONFIG_FILE=str(p.chromium_fonts_conf))
             subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
+    changed |= apply_session_env(state)
     changed |= apps.apply(text is not None or conf is not None)
     return changed
