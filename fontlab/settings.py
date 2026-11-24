@@ -72,6 +72,11 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("gamma", "Chromium", "Text gamma", steps(1, 2.2, 0.1, 1), "1.2",
             "Text gamma in Chromium and Electron apps. Higher = heavier light-on-dark text.",
             needs=("shim",)),
+    Setting("session_shim", "Chromium", "Session-wide shim", ("off", "on"), "off",
+            "Add the shim to LD_PRELOAD in ~/.config/uwsm/env and systemd --user so Chromium, Electron "
+            "and AppImages launched from keybinds or terminals get contrast, gamma and system-ui. "
+            "Needs a new login.",
+            needs=("shim",)),
     # System: needs sudo and a new login.
     Setting("freetype_darkening", "System", "FreeType stem darkening", ("keep", "off", "cff", "all", "strong"),
             "keep", "FREETYPE_PROPERTIES in /etc/environment (GTK, Qt, terminals). keep: fontlab leaves it "
