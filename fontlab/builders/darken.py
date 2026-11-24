@@ -53,6 +53,9 @@ def embolden_contour(pts, outer_cw, xs, ys):
 
 def darken(src, dst, xem, yem):
     font = TTFont(src)
+    if "fvar" in font:
+        font.save(dst)
+        return dst
     upem = font["head"].unitsPerEm
     xs, ys = xem * upem, yem * upem
     glyf, hmtx = font["glyf"], font["hmtx"]

@@ -46,14 +46,14 @@ ADWAITA = {"AdwaitaSans-Regular.ttf": False, "AdwaitaSans-Italic.ttf": True}
 RIBBI = ("Regular", "Italic", "Bold", "Bold Italic")
 
 
-def _adwaita_names(f, style, wclass, italic, path):
+def _static_names(f, family_name, ps_prefix, style, wclass, italic, path):
     n = f["name"]
     for nid in (16, 17, 21, 22, 25):
         n.removeNames(nameID=nid)
-    family = "Adwaita Sans" if style in RIBBI else "Adwaita Sans " + style.replace(" Italic", "")
+    family = family_name if style in RIBBI else family_name + " " + style.replace(" Italic", "")
     sub = style if style in RIBBI else ("Italic" if italic else "Regular")
-    for nid, s in ((1, family), (2, sub), (4, "Adwaita Sans " + style),
-                   (6, "AdwaitaSans-" + style.replace(" ", "")), (16, "Adwaita Sans"), (17, style)):
+    for nid, s in ((1, family), (2, sub), (4, f"{family_name} {style}"),
+                   (6, f"{ps_prefix}-{style.replace(' ', '')}"), (16, family_name), (17, style)):
         n.setName(s, nid, 3, 1, 0x409)
     os2 = f["OS/2"]
     os2.usWeightClass = wclass
@@ -61,8 +61,9 @@ def _adwaita_names(f, style, wclass, italic, path):
     os2.fsSelection = ((os2.fsSelection & ~0b1100001) | (1 if italic else 0)
                        | (0b100000 if bold else 0) | (0b1000000 if not italic and not bold else 0))
     f["head"].macStyle = (1 if bold else 0) | (2 if italic else 0)
-    if "STAT" in f:
-        del f["STAT"]
+    for t in ("STAT", "avar"):
+        if t in f:
+            del f[t]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     f.save(path)
 
@@ -75,11 +76,56 @@ def adwaita(system_dir, out_dir, weights):
             style = TTFont(path)["name"].getDebugName(inst.subfamilyNameID)
             loc = dict(inst.coordinates, opsz=14)
             f = instantiateVariableFont(TTFont(path), loc)
-            _adwaita_names(f, style, int(loc["wght"]), italic,
-                           os.path.join(out_dir, "400", f"AdwaitaSans-{style.replace(' ', '')}.ttf"))
+            _static_names(f, "Adwaita Sans", "AdwaitaSans", style, int(loc["wght"]), italic,
+                          os.path.join(out_dir, "400", f"AdwaitaSans-{style.replace(' ', '')}.ttf"))
         for w in weights:
             f = instantiateVariableFont(TTFont(path), {"wght": w, "opsz": 14})
-            _adwaita_names(f, "Italic" if italic else "Regular", 400, italic, os.path.join(out_dir, str(w), src))
+            _static_names(f, "Adwaita Sans", "AdwaitaSans", "Italic" if italic else "Regular",
+                          400, italic, os.path.join(out_dir, str(w), src))
+
+
+# --- Google Sans Flex ---------------------------------------------------------------
+# One variable file with both upright (slnt=0) and italic (slnt=-10) named instances.
+# Instancing to static faces lets ui_weight and outline darkening reach Google Sans too.
+
+def google_sans_flex(vf_path, out_dir, weights):
+    """<out>/400: all named instances as static files. <out>/<w>: Regular/Italic at w."""
+    meta = TTFont(vf_path)
+    for inst in meta["fvar"].instances:
+        style = meta["name"].getDebugName(inst.subfamilyNameID)
+        loc = dict(inst.coordinates)
+        italic = loc.get("slnt", 0.0) < 0 or "Italic" in style
+        f = instantiateVariableFont(TTFont(vf_path), loc)
+        _static_names(f, "Google Sans Flex", "GoogleSansFlex", style, int(round(loc["wght"])),
+                      italic, os.path.join(out_dir, "400", f"GoogleSansFlex-{style.replace(' ', '')}.ttf"))
+    for w in weights:
+        for style, slnt, italic in (("Regular", 0.0, False), ("Italic", -10.0, True)):
+            f = instantiateVariableFont(TTFont(vf_path),
+                                        {"wght": w, "opsz": 18.0, "wdth": 100.0, "ROND": 0.0, "slnt": slnt})
+            _static_names(f, "Google Sans Flex", "GoogleSansFlex", style, 400, italic,
+                          os.path.join(out_dir, str(w), f"GoogleSansFlex-{style}.ttf"))
+
+
+# --- Roboto -------------------------------------------------------------------------
+# Normal-width (wdth=100) named instances as static files, plus heavier Regular/Italic.
+
+def roboto(regular_vf, italic_vf, out_dir, weights):
+    """<out>/400: normal-width named instances. <out>/<w>: Regular/Italic at w."""
+    for path, italic in ((regular_vf, False), (italic_vf, True)):
+        meta = TTFont(path)
+        for inst in meta["fvar"].instances:
+            loc = dict(inst.coordinates)
+            if loc.get("wdth", 100.0) != 100.0:
+                continue
+            style = meta["name"].getDebugName(inst.subfamilyNameID)
+            f = instantiateVariableFont(TTFont(path), loc)
+            _static_names(f, "Roboto", "Roboto", style, int(round(loc["wght"])), italic,
+                          os.path.join(out_dir, "400", f"Roboto-{style.replace(' ', '')}.ttf"))
+        for w in weights:
+            style = "Italic" if italic else "Regular"
+            f = instantiateVariableFont(TTFont(path), {"wght": w, "wdth": 100.0})
+            _static_names(f, "Roboto", "Roboto", style, 400, italic,
+                          os.path.join(out_dir, str(w), f"Roboto-{style}.ttf"))
 
 
 # --- JetBrains Mono -----------------------------------------------------------------

@@ -155,17 +155,19 @@ def _aliases(names: Iterable[str], target: str) -> str:
 """ for n in names)
 
 
-def web_conf(state: State, inter_available: bool) -> str | None:
-    """None means no file: the system decides."""
+def web_conf(state: State, inter_available: bool, roboto: bool = False) -> str | None:
+    """None means no file: the system decides.
+    roboto: the Roboto package is installed, so keep Roboto resolving to itself instead of aliasing it."""
     choice = state["web_fonts"]
     if choice == "windows":            # Chromium gets Windows fonts (chromium.py); others keep Inter
         choice = "inter" if inter_available else "system"
     if choice == "system":
         return None
     rewrites = system_sans_rewrites()
+    sans = [n for n in SANS_NAMES if not (roboto and n == "Roboto")]
     if choice == "inter":
-        body = _aliases([*SANS_NAMES, *rewrites], "Inter")
+        body = _aliases([*sans, *rewrites], "Inter")
     else:
-        body = _aliases([*SANS_NAMES, *SF_EXTRA_NAMES, *rewrites], "SF Pro Text") + SF_RULES
+        body = _aliases([*sans, *SF_EXTRA_NAMES, *rewrites], "SF Pro Text") + SF_RULES
     note = ("  <!-- prepend+strong keeps the rest of the list, so CJK, emoji and icons still fall back. -->\n")
     return HEADER + "<fontconfig>\n" + note + body + "</fontconfig>\n"

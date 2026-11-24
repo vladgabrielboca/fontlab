@@ -187,8 +187,8 @@ class JetBrainsMono(Package):
 
 class GoogleSansFlex(Package):
     id, name = "googlesans", "Google Sans Flex"
-    summary = ("Fills in for Google Sans when Google's pages don't load it (search titles). "
-               "Stock weight. Downloaded from github.com/google/fonts.")
+    summary = ("Fills in for Google Sans when Google's pages don't load it (search titles), "
+               "with heavier weights and darkening. Downloaded from github.com/google/fonts.")
     optional = True
     COMMIT = "fa826bb2a3e26df8c1bee99351fc0d039aeed7d2"
     BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/googlesansflex"
@@ -199,12 +199,38 @@ class GoogleSansFlex(Package):
     OFL_SHA256 = "fc13d69f63e36d284b6e383d4d1463d8ad404f0aa065e57cf961252d51063137"
 
     def build(self, stage, work, progress, folder):
-        # One variable font. Its named instances (Regular, Medium, Bold...) sit at opsz 18
-        # and normal width, the same defaults as Google's web font, so it ships as is.
-        (stage / "400").mkdir()
-        fetch(self.URL, stage / "400" / self.FONT, progress, self.SHA256)
+        vf = fetch(self.URL, work / self.FONT, progress, self.SHA256)
         fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
-        return Manifest("5.000 " + self.COMMIT[:7])
+        progress("building Google Sans Flex static family")
+        run_builder(["google-sans-flex", str(vf), str(stage), *WEIGHTS])
+        return Manifest("5.000-static " + self.COMMIT[:7], ["400", *WEIGHTS])
+
+
+class Roboto(Package):
+    id, name = "roboto", "Roboto"
+    summary = ("Darkened local Roboto with heavier weights. Keeps Roboto on sites like YouTube "
+               "(when remote Roboto webfonts are blocked) instead of aliasing it to Inter.")
+    optional = True
+    VERSION = "3.015"
+    COMMIT = "1c627bfa375fc51cf86fabeca4f6e08a95f0aa5c"
+    BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/roboto"
+    REG_URL = f"{BASE}/Roboto%5Bwdth%2Cwght%5D.ttf"
+    REG_SHA256 = "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
+    ITAL_URL = f"{BASE}/Roboto-Italic%5Bwdth%2Cwght%5D.ttf"
+    ITAL_SHA256 = "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182"
+    OFL_URL = f"{BASE}/OFL.txt"
+    OFL_SHA256 = "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41"
+
+    def build(self, stage, work, progress, folder):
+        reg = fetch(self.REG_URL, work / "Roboto.ttf", progress, self.REG_SHA256)
+        ital = fetch(self.ITAL_URL, work / "Roboto-Italic.ttf", progress, self.ITAL_SHA256)
+        fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
+        progress("building Roboto static family")
+        run_builder(["roboto", str(reg), str(ital), str(stage), *WEIGHTS])
+        replaces = [str(p) for pat in ("Roboto-*.[ot]tf", "Roboto[[]*.ttf")
+                    for p in find_fonts(pat) if "Condensed" not in p.name and "Mono" not in p.name
+                    and "Slab" not in p.name and "Serif" not in p.name]
+        return Manifest(f"{self.VERSION} {self.COMMIT[:7]}", ["400", *WEIGHTS], replaces)
 
 
 class SFPro(Package):
@@ -286,8 +312,8 @@ class WindowsFonts(Package):
         return Manifest(f"imported from {folder}")
 
 
-PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), GoogleSansFlex(), SFPro(),
-                                  WindowsFonts())
+PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), GoogleSansFlex(), Roboto(),
+                                  SFPro(), WindowsFonts())
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 __all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "ToolError", "WEIGHTS"]
