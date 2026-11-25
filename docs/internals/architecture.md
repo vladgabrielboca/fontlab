@@ -1,14 +1,14 @@
 # Architecture
 
-`fontlab` is a declarative configurator: `~/.config/fontlab/state.toml` declares the desired rendering state, and `fontlab/apply.py` converges every managed output to match it idempotently.
+`fontlab` reads `~/.config/fontlab/state.toml` and updates every managed output from `fontlab/apply.py`. Running `apply()` twice with the same state makes no changes on the second pass.
 
-## Core Dataflow (`apply.py`)
+## How `apply()` works
 
 ```text
 ~/.config/fontlab/state.toml
         │
         ▼
-  state.load() ──▶ Context.detect().effective(state)   (replaces unavailable choices with defaults)
+  state.load() ──▶ Context.detect().effective(state)   (falls back to defaults for unavailable choices)
         │
         ├──▶ 1. fonts.install(state)          ──▶ ~/.local/share/fonts/fontlab/<family>/
         │                                         (caches darkened TTFs in ~/.cache/fontlab/builds/)
@@ -28,57 +28,60 @@
         └──▶ 6. desktop.apply_environment()   ──▶ /etc/environment (only with --system / ! and != "keep")
 ```
 
-## File Ownership (`fontlab/paths.py`)
+## Paths (`fontlab/paths.py`)
 
-Every path `fontlab` reads or writes is centralized on `paths.P` (`Paths(home)`). Tests call `paths.configure(tmp_home)` to isolate everything.
+Every path `fontlab` reads or writes lives on `paths.P` (`Paths(home)`). Unit tests call `paths.configure(tmp_home)` to redirect all reads and writes into a temp directory.
 
 | Category | Path | Notes |
 |---|---|---|
-| **State** | `~/.config/fontlab/state.toml` | Only source of truth. |
-| **Presets** | `~/.config/fontlab/presets/<name>.toml` | Named snapshots (`fontlab preset save/load`). |
-| **App overrides** | `~/.config/fontlab/apps.json` | Manual `fontlab apps add/skip` list. |
-| **Font sources** | `~/.local/share/fontlab/sources/<pkg>/` | Unmodified packages + `manifest.json`; files `0o444` (hard-linked on install). |
-| **Installed fonts** | `~/.local/share/fonts/fontlab/<pkg>/` | Active family folders with `.fontlab-key` marker; swapped atomically via `replace_dir()`. |
-| **Fontconfig** | `~/.config/fontconfig/conf.d/70-fontlab-render.conf` | AA, hinting, mono hinting, LCD filter, `small_bold`, Google Sans aliases, icon-font darkening exclusions, `<rejectfont>` globs. |
-| **Fontconfig** | `~/.config/fontconfig/conf.d/71-fontlab-web.conf` | `sans-serif`/`system-ui`/Arial/etc. aliases (`inter` or `sf`; absent for `system`). |
-| **Chromium** | `~/.config/fontlab/chromium-text.conf` | `CONTRAST=..` / `GAMMA=..`; removed when both equal Chromium's Linux defaults (`0.2` / `1.2`). |
-| **Chromium** | `~/.config/fontlab/chromium-fonts.conf` | Private `FONTCONFIG_FILE` for Chromium apps when `web_fonts != "system"` (maps GTK UI font → web font so CSS `system-ui` follows `web_fonts`, and adds Windows font dir + `data/web-windows.conf` for `windows`). |
-| **Runtime** | `~/.local/share/fontlab/runtime/` | Installed by `install.sh`: `fontlab-text-shim.so`, `chromium-env.sh`, `fontlab-launch`. |
-| **Session env** | `~/.config/uwsm/env` | Single marked block for `session_shim=on`, also synced to `systemctl --user`. |
-| **Desktop entries** | `~/.local/share/applications/*.desktop` | Marked with `X-Fontlab-Wrapped=true`; user-owned originals backed up in `~/.local/share/fontlab/desktop-backup/`. |
-| **Cache** | `~/.cache/fontlab/builds/` | Cached darkened builds (pruned to `KEEP_BUILDS = 16` most recent). |
-| **Cache** | `~/.cache/fontlab/apps.json` | Chromium binary detection cache keyed by `path:size:mtime`. |
-| **Cache** | `~/.cache/fontlab/preview/` | Profiles & isolated comparison configs for `fontlab preview`. |
-| **System (sudo)** | `/usr/local/bin/<app>` | Launch wrappers for `chromium.APPS` installed by `install.sh`. |
-| **System (sudo)** | `/etc/environment` | Only `FREETYPE_PROPERTIES` and `QT_NO_SYNTHESIZED_BOLD` lines touched. |
+| State | `~/.config/fontlab/state.toml` | Only source of truth. |
+| Presets | `~/.config/fontlab/presets/<name>.toml` | Named snapshots (`fontlab preset save/load`). |
+| App overrides | `~/.config/fontlab/apps.json` | Manual `fontlab apps add/skip` list. |
+| Font sources | `~/.local/share/fontlab/sources/<pkg>/` | Unmodified packages and `manifest.json`; files `0o444` (hard-linked on install). |
+| Installed fonts | `~/.local/share/fonts/fontlab/<pkg>/` | Active family folders with `.fontlab-key` marker; swapped atomically via `replace_dir()`. |
+| Fontconfig | `~/.config/fontconfig/conf.d/70-fontlab-render.conf` | AA, hinting, mono hinting, LCD filter, `small_bold`, Google Sans aliases, icon-font darkening exclusions, `<rejectfont>` globs. |
+| Fontconfig | `~/.config/fontconfig/conf.d/71-fontlab-web.conf` | `sans-serif`/`system-ui`/Arial aliases (`inter` or `sf`; absent for `system`). |
+| Chromium | `~/.config/fontlab/chromium-text.conf` | `CONTRAST=..` and `GAMMA=..`; removed when both match Chromium's Linux defaults (`0.2` / `1.2`). |
+| Chromium | `~/.config/fontlab/chromium-fonts.conf` | Private `FONTCONFIG_FILE` for Chromium apps when `web_fonts != "system"`. Maps the GTK UI font to the chosen web font so CSS `system-ui` follows `web_fonts`, and adds the Windows font dir plus `data/web-windows.conf` when `web_fonts=windows`. |
+| Runtime | `~/.local/share/fontlab/runtime/` | Installed by `install.sh`: `fontlab-text-shim.so`, `chromium-env.sh`, `fontlab-launch`. |
+| Session env | `~/.config/uwsm/env` | Single marked block for `session_shim=on`, also synced to `systemctl --user`. |
+| Desktop entries | `~/.local/share/applications/*.desktop` | Marked with `X-Fontlab-Wrapped=true`; user-owned originals backed up in `~/.local/share/fontlab/desktop-backup/`. |
+| Cache | `~/.cache/fontlab/builds/` | Cached darkened builds (pruned to `KEEP_BUILDS = 16` most recent). |
+| Cache | `~/.cache/fontlab/apps.json` | Chromium binary detection cache keyed by `path:size:mtime`. |
+| Cache | `~/.cache/fontlab/preview/` | Profiles and isolated comparison configs for `fontlab preview`. |
+| System (sudo) | `/usr/local/bin/<app>` | Launch wrappers for `chromium.APPS` installed by `install.sh`. |
+| System (sudo) | `/etc/environment` | Only `FREETYPE_PROPERTIES` and `QT_NO_SYNTHESIZED_BOLD` lines touched. |
 
-## How Font Packages & Builders Work
+## Font packages and builders
 
-1. **`packages.py`** downloads or imports raw assets into a staging dir, runs `builders/run.py` via `toolchain.py` (which locates a Python with `fontTools`: system, `uv`, or an auto-created venv at `~/.local/share/fontlab/venv`), writes `manifest.json`, sets files `0o444`, and atomically swaps into `~/.local/share/fontlab/sources/<id>/`.
-   - `<id>/400/` holds the full stock static family (absent for `jbm`, where the system font is the 400 base).
-   - `<id>/<weight>/` (`430`, `450`, `475`, `500`) holds only the instanced `Regular` and `Italic` overrides, stripped of `STAT`/`avar` and stamped with Regular/Italic `name`/`OS/2`/`head` metadata so apps treat them as normal weight `400`.
-   - **Important hinting difference across packages**:
-     - `Inter 400` keeps TrueType hinting bytecode (`fpgm`, `prep`, `cvt `, `gasp`); instanced `Inter 430–500` have **no** TT bytecode tables.
-     - `Adwaita Sans 400–500` have no TT bytecode tables.
-     - `Roboto 400–500` keep TT bytecode tables at every weight.
+1. `packages.py` downloads or imports raw files into a staging directory, runs `builders/run.py` through `toolchain.py` (which finds a Python with `fontTools`: system, `uv`, or a venv created at `~/.local/share/fontlab/venv`), writes `manifest.json`, sets files `0o444`, and swaps the directory into `~/.local/share/fontlab/sources/<id>/`.
+   - `<id>/400/` holds the stock static family (omitted for `jbm`, where the system font serves as the 400 base).
+   - `<id>/<weight>/` (`430`, `450`, `475`, `500`) holds only instanced `Regular` and `Italic` overrides, with `STAT`/`avar` removed and `name`/`OS/2`/`head` stamped as Regular/Italic so apps treat them as weight `400`.
+   - TrueType hinting bytecode differs by package:
+     - `Inter 400` keeps TT bytecode (`fpgm`, `prep`, `cvt `, `gasp`); instanced `Inter 430–500` have none.
+     - `Adwaita Sans 400–500` have no TT bytecode.
+     - `Roboto 400–500` keep TT bytecode at every weight.
      - `SF Pro 400` is OpenType CFF (`.otf`); instanced `SF Pro 430–500` are TrueType (`.ttf`) without TT bytecode.
-     - `JetBrains Mono 430–500` grafts variable glyph outlines onto the user's installed copy (preserving Nerd Font icons) and explicitly strips bytecode (`fpgm`/`prep`/`cvt ` + per-glyph programs).
-2. **`fonts.py`** computes a `FontSet` per family in `FAMILIES`. When `darkening > 0` on a TrueType UI family (`inter`, `adwaita`, `roboto`; `googlesans` stays stock so it matches Google's web font), `realize()` runs `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`) into `~/.cache/fontlab/builds/<family>-<key>/`.
-3. **`fonts.install()`** hard-links files into a staging dir, atomically replaces `~/.local/share/fonts/fontlab/<family>`, and calls `newer_than()` to bump mtime past the current whole second so `fc-cache` never skips a rapid back-to-back apply.
+     - `JetBrains Mono 430–500` graft variable glyph outlines onto the user's installed copy (keeping Nerd Font icons) and strip bytecode (`fpgm`/`prep`/`cvt ` plus per-glyph programs).
+2. `fonts.py` plans a `FontSet` per family in `FAMILIES`. When `darkening > 0` on a TrueType UI family (`inter`, `adwaita`, `roboto`; `googlesans` stays stock to match Google's web font), `realize()` runs `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`) into `~/.cache/fontlab/builds/<family>-<key>/`.
+3. `fonts.install()` hard-links files into a staging directory, replaces `~/.local/share/fonts/fontlab/<family>` atomically, and calls `newer_than()` to push mtime past the current whole second so `fc-cache` does not skip back-to-back applies.
 
-## How the Chromium Text Shim Works (`chromium/`)
+## Chromium text shim (`chromium/`)
 
-Chromium only accepts `--text-contrast` and `--text-gamma` as command-line switches and does **not** forward them to renderer processes.
+Chromium only reads `--text-contrast` and `--text-gamma` from command-line flags and drops them when spawning renderer processes.
 
-- **Three entry routes** load `fontlab-text-shim.so` and export `FONTCONFIG_FILE`:
-  1. `/usr/local/bin/<browser>` wrappers (`wrapper.sh` → `chromium-env.sh`) for terminal launches and launchers whose `Exec=` resolves through `PATH`.
-  2. `fontlab-launch` prepended to Chromium/Electron `.desktop` entries in `~/.local/share/applications/` (`apps.py`, skipping apps already covered by a `/usr/local/bin` wrapper so tools like `omarchy-launch-browser` still see the browser name first).
-  3. Optional `session_shim=on` (`LD_PRELOAD` in `~/.config/uwsm/env` + `systemd --user`) for apps started via WM keybinds or AppImages.
-- **Inside `chromium/text-shim.c`**:
-  - `shim_init()` (constructor) resolves libc symbols eagerly, checks whether `/proc/self/exe`'s directory contains `icudtl.dat` + (`resources.pak` or `v8_context_snapshot.bin`), reads `FONTLAB_TEXT_CONF` (or `~/.config/fontlab/chromium-text.conf`), sets `FONTCONFIG_FILE` if unset and `~/.config/fontlab/chromium-fonts.conf` exists, and strips `fontlab-text-shim.so` from `LD_PRELOAD`.
-  - **Zygote path**: hooks `sendmsg()`, detects base::Pickle `"renderer"` fork messages, and splices `--text-contrast=...` and `--text-gamma=...` into the serialized argv.
-  - **No-zygote path**: hooks `execve`/`execv`/`execvp`/`execvpe`/`posix_spawn`, detects `--type=renderer`, and appends the flags on a stack buffer (no heap allocation after `fork()`).
+Three entry points load `fontlab-text-shim.so` and set `FONTCONFIG_FILE`:
 
-## Isolated Preview & Comparison (`fontlab/preview.py`)
+1. `/usr/local/bin/<browser>` wrappers (`wrapper.sh` -> `chromium-env.sh`) for terminal launches and callers resolving through `PATH`.
+2. `fontlab-launch` prepended to Chromium/Electron `.desktop` entries in `~/.local/share/applications/` (`apps.py`). Apps already covered by a `/usr/local/bin` wrapper are skipped so helpers like `omarchy-launch-browser` still see the browser command first.
+3. Optional `session_shim=on` (`LD_PRELOAD` in `~/.config/uwsm/env` and `systemd --user`) for apps launched from window-manager keybinds or as AppImages.
 
-`compare_setup(state)` builds a completely self-contained fontconfig tree + symlinked font directory + `chromium-text.conf` under `~/.cache/fontlab/preview/compare/` (hiding `~/.local/share/fonts/fontlab` via `<rejectfont>`) and launches `/usr/bin/chromium` directly (bypassing `/usr/local/bin/chromium`). This is the exact pattern used for isolated headless benchmarks (see `.agents/skills/render-benchmark/SKILL.md`).
+Inside `chromium/text-shim.c`:
+
+- `shim_init()` runs as a constructor, resolves libc symbols eagerly, checks whether `/proc/self/exe`'s directory has `icudtl.dat` plus `resources.pak` or `v8_context_snapshot.bin`, reads `FONTLAB_TEXT_CONF` (or `~/.config/fontlab/chromium-text.conf`), sets `FONTCONFIG_FILE` if unset and `~/.config/fontlab/chromium-fonts.conf` exists, and strips `fontlab-text-shim.so` from `LD_PRELOAD`.
+- Zygote path: hooks `sendmsg()`, detects `base::Pickle` `"renderer"` fork messages, and splices `--text-contrast=...` and `--text-gamma=...` into the serialized argv.
+- No-zygote path: hooks `execve`, `execv`, `execvp`, `execvpe`, and `posix_spawn`, checks for `--type=renderer`, and appends the flags using a stack buffer (no heap allocation after `fork()`).
+
+## Isolated preview (`fontlab/preview.py`)
+
+`compare_setup(state)` writes a separate fontconfig tree, symlinked font directory, and `chromium-text.conf` under `~/.cache/fontlab/preview/compare/`. It hides `~/.local/share/fonts/fontlab` with `<rejectfont>` and launches `/usr/bin/chromium` directly so `/usr/local/bin/chromium` does not interfere. Headless benchmarks follow the same isolation pattern (see `.agents/skills/render-benchmark/SKILL.md`).
