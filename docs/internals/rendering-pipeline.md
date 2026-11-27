@@ -54,7 +54,7 @@ From Skia `src/ports/SkTypeface_fontations.cpp`:
 - **`kNormal` and `kFull`**: Uses `AutoHinting::Fallback` and rounds glyph advances to integers (`roundf(adjusted_advance)`):
   - Fonts with TrueType bytecode (`Inter 400`, `Roboto 400–500`, `Segoe UI`) run Skrifa's TrueType v40 bytecode interpreter.
   - Fonts without bytecode (`Inter 430–500`, `Adwaita Sans`) fall back to Skrifa's full autohinter (horizontal and vertical snapping).
-- **Fontconfig `lcdfilter` is ignored in Chromium**: Fontations outputs paths to Skia's `GenerateImageFromPath()`, which uses Skia's own LCD filter.
+- **Fontconfig `lcdfilter` is ignored in Chromium**: Fontations outputs paths to Skia's `GenerateImageFromPath()`, which uses Skia's own LCD filter (`pack4xHToMask`, a compiled-in 12-tap Gaussian per channel). `chromium_lcd_filter=box` swaps that table at runtime from the shim (Experiment 5).
 - **Fontconfig `embolden` (`small_bold`) is ignored in Chromium and Qt**: Only GTK/Pango honors it.
 
 ## Display density limits (109 PPI vs. HiDPI)

@@ -7,17 +7,22 @@
 // Safe to load session-wide via LD_PRELOAD: non-Chromium processes exit shim_init() after
 // a single access() check and hit a one-branch fast path in every hooked call. All real_*
 // symbols are resolved eagerly at load time so forked children never call dlsym().
-// Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=..), written by fontlab,
+//  - with LCD_FILTER=box, swaps Skia's subpixel (LCD) filter table for a 1-pixel box, in
+//    memory, in every Chromium process (see patch_lcd_filter), and stays in LD_PRELOAD so
+//    zygote, GPU and utility processes load it too.
+// Values: ~/.config/fontlab/chromium-text.conf (CONTRAST=.. GAMMA=.. [LCD_FILTER=box]), written by fontlab,
 // or the file in $FONTLAB_TEXT_CONF (the preset comparison window). Missing file = no change.
 // Fork message (base::Pickle): u32 payload_size | i32 cmd | str process_type | i32 argc | argc x str | rest
 // str = i32 len + bytes, padded to 4.
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <link.h>
 #include <spawn.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -31,10 +36,11 @@ static int (*real_posix_spawn)(pid_t *, const char *, const posix_spawn_file_act
 static char extra[2][64];
 static int have_extra = 0;
 static int is_chromium = 0;
+static int lcd_box = 0;
 
 static void load_conf(void) {
   have_extra = 0;
-  char path[512], line[128], c[32] = "", g[32] = "";
+  char path[512], line[128], c[32] = "", g[32] = "", lf[16] = "";
   const char *own = getenv("FONTLAB_TEXT_CONF");
   const char *home = getenv("HOME");
   if (own && *own) snprintf(path, sizeof path, "%s", own);
@@ -45,8 +51,10 @@ static void load_conf(void) {
   while (fgets(line, sizeof line, f)) {
     sscanf(line, "CONTRAST=%31[0-9.]", c);
     sscanf(line, "GAMMA=%31[0-9.]", g);
+    sscanf(line, "LCD_FILTER=%15[a-z]", lf);
   }
   fclose(f);
+  lcd_box = !strcmp(lf, "box");
   if (!*c || !*g) return;
   snprintf(extra[0], sizeof extra[0], "--text-contrast=%s", c);
   snprintf(extra[1], sizeof extra[1], "--text-gamma=%s", g);
@@ -64,10 +72,73 @@ static void load_fontconfig(void) {
   }
 }
 
+// ---- Skia LCD filter ----
+// Skia renders subpixel glyphs from outlines (Chromium uses Fontations, so all of them)
+// with pack4xHToMask() in SkScalerContext.cpp: 4 samples per pixel, then a 12-tap FIR per
+// colour channel from a compiled-in uint32[36] table (a Gaussian, sigma 5/3 sample). That
+// is wider than ClearType, so text looks soft. No flag reaches it, so the shim finds the
+// table by content in the read-only segments of the main executable (Chromium, Electron)
+// and of libcef.so / libelectron*.so (CEF apps such as Spotify), and overwrites it in this
+// process only (copy-on-write page). Renderers forked from the zygote inherit the patched
+// page. Exactly one hit is required; anything else (another Skia, already patched) changes
+// nothing. Measurements: docs/research/experiments.md, Experiment 5.
+static const uint32_t LCD_STOCK[36] = {
+  3, 11, 28, 51, 64, 57, 36, 16, 5, 1, 0, 0,
+  0, 2, 8, 22, 43, 61, 61, 43, 22, 8, 2, 0,
+  0, 0, 1, 5, 16, 36, 57, 64, 51, 28, 11, 3};
+// Each channel averages the 4 samples of a 1-pixel window centred on its subpixel; every
+// row sums to 0x110 like the stock rows, so overall ink stays the same.
+static const uint32_t LCD_BOX[36] = {
+  0, 0, 23, 68, 68, 68, 45, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 68, 68, 68, 68, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 45, 68, 68, 68, 23, 0, 0};
+
+struct lcd_scan { uint32_t *hit; int hits; };
+
+static int skia_object(const char *name) {
+  if (!name || !*name) return 1;   // the main executable
+  const char *b = strrchr(name, '/');
+  b = b ? b + 1 : name;
+  return !strncmp(b, "libcef.so", 9) || !strncmp(b, "libelectron", 11);
+}
+
+static int scan_object(struct dl_phdr_info *info, size_t size, void *data) {
+  (void)size;
+  struct lcd_scan *s = data;
+  if (!skia_object(info->dlpi_name)) return 0;
+  for (int i = 0; i < info->dlpi_phnum; i++) {
+    const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+    if (ph->p_type != PT_LOAD || ph->p_flags != PF_R || ph->p_filesz < sizeof LCD_STOCK) continue;
+    uintptr_t start = (info->dlpi_addr + ph->p_vaddr + 3) & ~(uintptr_t)3;
+    uintptr_t end = info->dlpi_addr + ph->p_vaddr + ph->p_filesz - sizeof LCD_STOCK;
+    for (const uint32_t *w = (const uint32_t *)start; (uintptr_t)w <= end; w++) {
+      if (w[0] == 3 && w[1] == 11 && w[2] == 28 && !memcmp(w, LCD_STOCK, sizeof LCD_STOCK)) {
+        s->hit = (uint32_t *)w;
+        s->hits++;
+      }
+    }
+  }
+  return 0;
+}
+
+static void patch_lcd_filter(void) {
+  struct lcd_scan s = {0, 0};
+  dl_iterate_phdr(scan_object, &s);
+  if (s.hits != 1) return;
+  long pg = sysconf(_SC_PAGESIZE);
+  if (pg <= 0) return;
+  uintptr_t a = (uintptr_t)s.hit & ~(uintptr_t)(pg - 1);
+  uintptr_t e = ((uintptr_t)s.hit + sizeof LCD_BOX + (uintptr_t)pg - 1) & ~(uintptr_t)(pg - 1);
+  if (mprotect((void *)a, e - a, PROT_READ | PROT_WRITE)) return;
+  memcpy(s.hit, LCD_BOX, sizeof LCD_BOX);
+  mprotect((void *)a, e - a, PROT_READ);
+}
+
 // Launchers (shell scripts, /usr/bin/chromium, AppImage runtimes, session LD_PRELOAD) pass
 // this .so on in LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps
 // the hook, sets FONTCONFIG_FILE if needed, and drops the .so from LD_PRELOAD, so zygote,
 // GPU, renderers and anything the app opens (a terminal inside an editor, say) do not load it.
+// With LCD_FILTER=box it stays: each Chromium process patches its own copy of the filter.
 static int file_in_dir(const char *dir, const char *name) {
   char p[1024];
   snprintf(p, sizeof p, "%s/%s", dir, name);
@@ -97,6 +168,10 @@ __attribute__((constructor)) static void shim_init(void) {
   is_chromium = 1;
   load_conf();   // now, not after fork: fopen allocates, a forked child must not
   load_fontconfig();
+  if (lcd_box) {
+    patch_lcd_filter();
+    return;
+  }
   const char *lp = getenv("LD_PRELOAD");
   if (!lp) return;
   char keep[4096] = "", item[1024];

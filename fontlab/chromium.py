@@ -40,11 +40,20 @@ WRAPPER_MARK = apps.WRAPPER_MARK
 SYSTEM_UI = {"inter": "Inter", "sf": "SF Pro Text", "windows": "Segoe UI"}
 
 
+def lcd_box(state: State) -> bool:
+    """Whether the shim swaps Skia's LCD filter: only subpixel text uses it."""
+    return state.get("chromium_lcd_filter") == "box" and state["antialias"] in ("rgb", "bgr")
+
+
 def text_conf(state: State) -> str | None:
-    """None when contrast and gamma are Chromium's own values: nothing to add."""
-    if state["contrast"] == BY_KEY["contrast"].default and state["gamma"] == BY_KEY["gamma"].default:
+    """None when contrast, gamma and the LCD filter are Chromium's own: nothing to add.
+    LCD_FILTER=box also keeps the shim in LD_PRELOAD for Chromium's child processes,
+    which patch the filter table in their own memory (chromium/text-shim.c)."""
+    box = lcd_box(state)
+    if (state["contrast"] == BY_KEY["contrast"].default and state["gamma"] == BY_KEY["gamma"].default
+            and not box):
         return None
-    return f"CONTRAST={state['contrast']}\nGAMMA={state['gamma']}\n"
+    return f"CONTRAST={state['contrast']}\nGAMMA={state['gamma']}\n" + ("LCD_FILTER=box\n" if box else "")
 
 
 def needs_launcher(state: State) -> bool:

@@ -385,6 +385,26 @@ class ChromiumDefaultsTest(TempHome):
         self.assertIn("GAMMA=1.4", chromium.text_conf(dict(DEFAULTS, gamma="1.4")))
         self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="windows")))
 
+    def test_lcd_filter_needs_subpixel_text(self) -> None:
+        box = dict(DEFAULTS, chromium_lcd_filter="box")
+        self.assertIsNone(chromium.text_conf(box))          # grayscale: Skia skips the LCD filter
+        self.assertEqual(chromium.text_conf(dict(box, antialias="rgb")),
+                         "CONTRAST=0.2\nGAMMA=1.2\nLCD_FILTER=box\n")
+        self.assertTrue(chromium.needs_launcher(dict(box, antialias="bgr")))
+        self.assertNotIn("LCD_FILTER", chromium.text_conf(dict(DEFAULTS, antialias="rgb", gamma="1.6")))
+
+    def test_shim_lcd_tables_keep_ink(self) -> None:
+        """text-shim.c: both filter tables have 3 rows of 12 taps summing to 0x110, and B
+        mirrors R (BGR panels swap the rows in Skia)."""
+        src = (Path(__file__).resolve().parent.parent / "chromium/text-shim.c").read_text()
+        import re
+        for name in ("LCD_STOCK", "LCD_BOX"):
+            body = re.search(rf"{name}\[36\] = {{(.*?)}};", src, re.S).group(1)
+            t = [int(x) for x in body.replace("\n", " ").split(",")]
+            rows = [t[0:12], t[12:24], t[24:36]]
+            self.assertEqual([sum(r) for r in rows], [0x110] * 3, name)
+            self.assertEqual(rows[2], rows[0][::-1], name)
+
 
 class AppsTest(TempHome):
     def setUp(self) -> None:

@@ -88,7 +88,7 @@ fontlab doctor
 5. **Preserve fontconfig and C shim details.**
    - `fc-cache` has 1-second mtime granularity, so directory swaps must keep `fonts.newer_than()` to avoid skipped cache updates on rapid applies.
    - Chromium ignores weak fontconfig aliases. Every family rewrite in `fontconfig.py` and `chromium.py` uses `mode="prepend" binding="strong"`.
-   - `chromium/text-shim.c` must stay async-signal-safe between `fork()` and `exec*()`. Resolve `dlsym()` handles and read config files eagerly in `__attribute__((constructor)) shim_init()`. Non-Chromium processes exit `shim_init()` right after checking for `icudtl.dat` plus `resources.pak` or `v8_context_snapshot.bin`, and Chromium strips `fontlab-text-shim.so` from `LD_PRELOAD` so child processes do not inherit it.
+   - `chromium/text-shim.c` must stay async-signal-safe between `fork()` and `exec*()`. Resolve `dlsym()` handles and read config files eagerly in `__attribute__((constructor)) shim_init()`. Non-Chromium processes exit `shim_init()` right after checking for `icudtl.dat` plus `resources.pak` or `v8_context_snapshot.bin`, and Chromium strips `fontlab-text-shim.so` from `LD_PRELOAD` so child processes do not inherit it, except with `LCD_FILTER=box`, where every Chromium process keeps it and patches Skia's LCD table in its constructor (never after `fork()`).
    - `packages.py` marks files in `~/.local/share/fontlab/sources/` as `0o444` because `fonts.py` hard-links them into `~/.local/share/fonts/fontlab/`.
 
 6. **Keep core `fontlab` stdlib-only.**
