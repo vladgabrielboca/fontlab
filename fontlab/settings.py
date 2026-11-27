@@ -37,7 +37,9 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("antialias", "Rendering", "Antialiasing", ("grayscale", "rgb", "bgr"), "grayscale",
             "grayscale: no colour fringes. rgb/bgr: subpixel, uses the panel's colour stripes."),
     Setting("hinting", "Rendering", "Hinting", HINT_STYLES, "slight",
-            "Grid fitting for proportional text. slight only snaps vertically and keeps spacing."),
+            "Grid fitting for proportional text in GTK, Qt, terminals and Firefox. slight only snaps "
+            "vertically and keeps spacing; full snaps to whole pixels and looks like Windows, if the font "
+            "carries hints. Chromium keeps its own value."),
     Setting("mono_hinting", "Rendering", "Hinting, monospace", HINT_STYLES, "slight",
             "Same, for monospace fonts (terminal). Kept separate so the terminal stays stable."),
     Setting("lcdfilter", "Rendering", "LCD filter", ("default", "light", "legacy", "none"), "light",
@@ -76,6 +78,10 @@ SETTINGS: tuple[Setting, ...] = (
             "Skia's LCD filter in Chromium and Electron apps, with antialiasing rgb or bgr. box: a 1-pixel "
             "filter like Windows ClearType, sharper than stock. The shim patches it in memory; restart the app.",
             needs=("shim",)),
+    Setting("chromium_hinting", "Chromium", "Hinting, Chromium", HINT_STYLES, "slight",
+            "Grid fitting in Chromium and Electron apps, all text including code blocks. Kept apart from "
+            "hinting because Chromium and FreeType want opposite values: slight keeps subpixel spacing, "
+            "full makes Chromium's glyphs land wrong. Ignored when it equals hinting."),
     Setting("session_shim", "Chromium", "Session-wide shim", ("off", "on"), "off",
             "Add the shim to LD_PRELOAD in ~/.config/uwsm/env and systemd --user so Chromium, Electron "
             "and AppImages launched from keybinds or terminals get contrast, gamma and system-ui. "

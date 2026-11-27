@@ -281,6 +281,25 @@ class ChromiumTest(TempHome):
         self.assertIn(str(paths.P.render_conf), xml)
         self.assertIn(str(paths.P.windows_fonts), xml)
 
+    def test_chromium_hinting_can_differ(self) -> None:
+        """FreeType wants full, Chromium wants slight; the second rule must win for Chromium only."""
+        self.assertEqual(chromium.hint_rule(dict(DEFAULTS)), "")       # defaults agree: nothing to add
+        self.assertFalse(chromium.needs_launcher(dict(DEFAULTS)))
+        full = dict(DEFAULTS, hinting="full")                          # chromium_hinting stays slight
+        self.assertIn("hintslight", chromium.hint_rule(full))
+        self.assertTrue(chromium.needs_launcher(full))
+        for choice in ("system", "inter", "sf", "windows"):
+            xml = chromium.fonts_conf(dict(full, web_fonts=choice))
+            self.assertIn("<const>hintslight</const>", xml, choice)    # override is present
+            if choice == "windows":                                     # and comes after the render conf
+                self.assertLess(xml.index(str(paths.P.render_conf)), xml.index("<const>hintslight</const>"))
+        # The native side keeps its own value in 70-fontlab-render.conf (mono keeps mono_hinting).
+        native = fontconfig.render_conf(dict(full), [])
+        self.assertIn("<const>hintfull</const>", native)
+        self.assertIn("<const>hintslight</const>", native)             # the mono rule, unchanged
+        none = chromium.hint_rule(dict(DEFAULTS, hinting="full", chromium_hinting="none"))
+        self.assertIn('<bool>false</bool>', none)
+
     def test_session_shim_env_drop_in(self) -> None:
         conf = paths.P.session_env_conf
         self.assertIsNone(chromium.session_env_text(dict(DEFAULTS)))

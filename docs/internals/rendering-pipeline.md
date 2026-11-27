@@ -56,6 +56,7 @@ From Skia `src/ports/SkTypeface_fontations.cpp`:
   - Fonts without bytecode (`Inter 430–500`, `Adwaita Sans`) fall back to Skrifa's full autohinter (horizontal and vertical snapping).
 - **Fontconfig `lcdfilter` is ignored in Chromium**: Fontations outputs paths to Skia's `GenerateImageFromPath()`, which uses Skia's own LCD filter (`pack4xHToMask`, a compiled-in 12-tap Gaussian per channel). `chromium_lcd_filter=box` swaps that table at runtime from the shim (Experiment 5).
 - **Fontconfig `embolden` (`small_bold`) is ignored in Chromium and Qt**: Only GTK/Pango honors it.
+- **Chromium reads `hintstyle` from fontconfig**, so it inherits the whole desktop's value. Fontlab keeps them apart: `hinting` is native (GTK, Qt, terminals, Firefox), and `chromium-fonts.conf` appends a rule after `70-fontlab-render.conf` with `chromium_hinting`. Without the split, `full` (which native text wants, Experiment 6) makes Chromium snap glyphs to the wrong pixels, and `slight` (which Chromium wants) leaves native text thin (Experiment 7).
 
 ## Display density limits (109 PPI vs. HiDPI)
 

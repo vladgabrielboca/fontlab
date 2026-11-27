@@ -156,3 +156,20 @@ Dead ends confirmed this run (see Ruled out): `w450 + d>=0.05`, `w450 + g>=1.3`,
 2. **FreeType's own LCD filters are already close to ClearType**: no patch needed on this path, unlike Skia's.
 3. **Full hinting only helps fonts that carry bytecode** (Segoe UI, Arial, Consolas, Inter 400 static). On unhinted fonts (Inter 430/450 instances, Adwaita Sans) `full` falls back to the autohinter and distorts (see Ruled out).
 4. **Toolkit limits**: GTK3, Qt widgets and foot honor `rgba`; GTK4/libadwaita renders grayscale only; Qt Quick `QtRendering` (distance fields, used by most of the Omarchy shell) ignores hinting and subpixel. Not yet measured on screen.
+
+## Experiment 7 (2026-11-27): live Wayland windows vs the Windows captures, and why the desktop still felt wrong
+
+- **Setup**: the live `state.toml` (rgb, slight, lcdlight, `chromium_lcd_filter=box`, `contrast=0.2`, `gamma=1.2`, `web_fonts=windows`, session shim), Hyprland 0.57.2, NVIDIA 620.73.04, M27Q3 at 2560x1440@320 scale 1.
+- **Method**: real (non-headless) Chromium window on `textpage.html?s=s6`, captured with `grim`, rows cut by the same label scan as the Windows reference (`linux-bench/rows.py`), compared to `chrome-testpage-s6.png`.
+
+### Findings
+
+1. **A live Chromium window now matches Windows.** Row L1 on the dark surface: `segoe-12` 6.7, `segoe-13` 6.3, `segoe-14` 5.9, `segoe-16` 4.5, `inter-14` 6.2, `consolas-14` 5.0; ink 1.00x. (Rows that cut 1px off compare badly — 20-28 — so only trust rows whose band scan matched; the 8x montage agrees.) In other words the shim + fontconfig combination reaches Windows quality *in the framebuffer*.
+2. **Half of a real page is not subpixel at all.** In the same live Brave window on x.com, text bands alternate between `mean chroma 0.00` (grayscale) and 25-55 (subpixel): the sidebar/nav/right rail are composited layers without an opaque background, so Chromium disables LCD text there (`WidgetBase::ComputeLCDTextPreference`, crbug 537814750, Won't Fix). Windows loses LCD text in the same places, but Chromium's Linux fallback is thinner: `SkSurfaceProps` carries one contrast/gamma for every mask format, so grayscale cannot get Windows' 2.2/1.0 while LCD keeps 1.2/0.2.
+3. **Electron apps can be 100% grayscale.** The T3Code window measured `chroma 0.0` over its whole text area while a Chromium window on the same page measured 16-55: a transparent/rounded toplevel gives every layer a non-opaque background.
+4. **Native text was the weakest surface, and it is a one-setting fix.** Reproduced Experiment 6 with `pango-view` against `zoom/explorer-filelist-1x.png` (Segoe UI 12px, white on `#191919`): `hintslight` + `lcdlight` renders visibly lighter and softer than Explorer, `hintfull`/`hintmedium` (identical in FreeType) matches it. The same holds for the unhinted Adwaita Sans and Inter at 13px: `full` is crisper with no distortion, so no per-family exception is needed. Chromium needs the opposite, so `hinting` (native, now `full`) and `chromium_hinting` (slight, written into `chromium-fonts.conf` after the render conf) are separate settings.
+5. **Terminal**: `foot` + JetBrainsMono Nerd Font 12px goes from thin 1px-ish stems at `mono_hinting=slight` to solid 2px stems at `full`, with no change in the cell grid. Verified on screen (`foot/live.png`), not only in `pango-view`.
+
+### Open: the display pipeline at 320Hz
+
+The same monitor on Windows runs 144-240Hz; on Linux the mode is `2560x1440@320` (mode clock 1,289,060 kHz = 30.9 Gb/s at 8bpc, above DP 1.4's 25.92 Gb/s net, so **DSC is in use**; 240Hz at 992,250 kHz = 23.8 Gb/s is not). `modetest -c` also exposes `dithering mode: auto`, `NV_CONNECTOR_COLOR_FORMAT: auto`, `NV_CONNECTOR_OUTPUT_BPC: auto`, and the panel is 8bit+FRC. Whether DSC/FRC/temporal dithering soften 1px text on the glass (while `grim` still captures the clean framebuffer) is not measurable from inside the session: it needs an eye or a photo. Test by switching to 240Hz, then `dithering mode off`, then `render:cm_enabled false`.

@@ -91,7 +91,8 @@ def compare_setup(state: State) -> tuple[dict[str, str], list[str]]:
     conf = d / "fonts.conf"
     write_if_changed(conf, chromium.private_fonts_conf(
         user, windows=windows, extra_dirs=(font_dir,), hidden_dirs=(p.installed_fonts,),
-        purpose="the fontlab preset comparison window", rules=chromium.system_ui_rule(state)))
+        purpose="the fontlab preset comparison window",
+        rules=chromium.hint_rule(state) + chromium.system_ui_rule(state)))
     env = dict(os.environ, FONTCONFIG_FILE=str(conf))
     subprocess.run(["fc-cache", str(font_dir)], env=env, check=False,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
