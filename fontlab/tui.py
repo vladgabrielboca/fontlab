@@ -202,9 +202,7 @@ class Screen:
         self.put(y, 2, ("▸ " if selected else "  ") + p.name, (self.ACCENT | curses.A_BOLD) if selected else 0)
         x = 4 + LABEL_W
         m = self.ctx.manifests.get(p.id)
-        if m and p.VARIABLE and not p.has_weights():
-            self.put(y, x, "! old install, no heavier weights: enter to update", self.WARN)
-        elif m:
+        if m:
             self.put(y, x, "✓ " + m.version, self.OK)
         elif blocker := p.unavailable():
             self.put(y, x, "  " + blocker, curses.A_DIM)

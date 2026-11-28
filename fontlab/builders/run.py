@@ -1,7 +1,7 @@
 """Entry point for font builds. Runs in a Python that has fontTools (see toolchain.py),
 so nothing here imports fontlab.
 
-  run.py build      jobs on stdin, one JSON object per line:
+  run.py < jobs     one JSON object per line:
                     {"out": path, "src": path, "variable": path or null, "method": "instance"
                      or "graft", "axes": {tag: value}, "wght": number, "darken": [xem, yem] or null}
 
@@ -30,7 +30,7 @@ def build(job):
 
 
 def main(argv):
-    if argv != ["build"]:
+    if argv:
         sys.exit(__doc__)
     jobs = [json.loads(line) for line in sys.stdin if line.strip()]
     with ProcessPoolExecutor() as pool:

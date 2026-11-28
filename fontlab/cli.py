@@ -119,10 +119,8 @@ def cmd_fonts(args) -> None:
     if args.action is None:
         for p in PACKAGES:
             m = p.manifest()
-            outdated = bool(m and p.VARIABLE and not p.has_weights())
-            mark = "!" if outdated else "✓" if m else " "
-            detail = (f"{m.version}, old install without heavier weights: fontlab fonts install {p.id}" if outdated
-                      else m.version if m else p.unavailable() or "not installed")
+            mark = "✓" if m else " "
+            detail = m.version if m else p.unavailable() or "not installed"
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
             print(f"   {'':<10} {p.summary}")
@@ -174,10 +172,7 @@ def cmd_doctor(_args) -> None:
                  else f"shim added to {paths.P.session_env_conf}: log out and back in")
     st = statefile.load()
     for p in PACKAGES:
-        if p.installed and p.VARIABLE and not p.has_weights():
-            line(False, f"font package {p.id}: old install without heavier weights, update with: fontlab fonts install {p.id}")
-        else:
-            line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
+        line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(st),
          "/etc/environment matches the state")
 

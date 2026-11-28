@@ -18,11 +18,12 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
 
 2. **Package (`fontlab/packages.py`)**:
    - Subclass `Package` with `id`, `name`, `summary`, `optional`, and `license_note` if needed.
-   - Set how `fonts.py` installs it: `weight_key` (the setting that picks its weight), `darkens=True` only for TrueType (`glyf`) outlines (`darken.py` skips variable fonts and `CFF`), `system_base=True` when the system font is the 400 base, `installs=False` when it is not a desktop font (Windows fonts).
-   - Override `install_sources()` when it is not a plain download (built from the installed copy, imported from a folder with `ask=True`, detected folders). The TUI and CLI only render that list.
+   - Set how `fonts.py` installs it: `weight_key` (the setting that picks its weight), `darkens=True` only for TrueType (`glyf`) outlines (`darken.py` skips variable fonts and `CFF`), `installs=False` when it is not a desktop font (Windows fonts).
+   - Override `install_sources()` when it is not a plain download (imported from a folder with `ask=True`, detected folders). The TUI and CLI only render that list.
    - These attributes are the only place package-to-setting links live: `availability.needs()`, `unlocking()`, `unlocks()` (Fonts tab) and `fonts.families()` derive from them.
    - Pin downloads with SHA-256 hashes via `download.fetch(..., sha256)`.
-   - `build()` only fetches stock files: the family into `400/`, variable fonts into `variable/` (list them in `VARIABLE`). Return `Manifest(version, replaces)`. `replaces` lists system font paths from `find_fonts()` (which excludes `paths.P.installed_fonts`) so `70-fontlab-render.conf` hides them with `<rejectfont>`.
+   - `build()` only fetches stock files: the family into `400/` (leave it out when the system font is the 400 base), variable fonts into `variable/` (list them in `VARIABLE`). Return `Manifest(version)`.
+   - Override `replaces()` to list the system font paths it stands in for, from `find_fonts()` (which excludes `paths.P.installed_fonts`), so `70-fontlab-render.conf` hides them with `<rejectfont>`. It runs at every apply.
    - Append to `PACKAGES` (which builds `BY_ID`). `Package.install()` marks staged files `0o444` and swaps atomically via `replace_dir()`.
 
 3. **Fontconfig and Chromium (`fontlab/fontconfig.py` and `fontlab/chromium.py`)**:

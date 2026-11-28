@@ -11,7 +11,7 @@ from fontTools.ttLib.tables import ttProgram
 
 def is_hinted(font):
     """Has instructions that encode a design (functions, control values). A lone `prep`
-    (Ubuntu Sans: dropout control and smoothing flags) does not."""
+    (JetBrains Mono's variable fonts: dropout control and smoothing flags) does not."""
     return "fpgm" in font or "cvt " in font
 
 

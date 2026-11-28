@@ -68,13 +68,6 @@ class Context:
             return None
         if s.key == "web_fonts" and (need := WEB_FONTS[choice].package):
             return None if self.has(need) else f"needs {self._name(need)}"
-        if s.key != "darkening" and (pkgs := unlocking(s.key)):
-            have = [p for p in pkgs if p.id in self.manifests]
-            if any(p.has_weights() for p in have):
-                return None
-            if have:
-                return f"reinstall {have[0].name} for heavier weights (fontlab fonts install {have[0].id})"
-            return self.setting_blocker(s)
         return self.setting_blocker(s)
 
     def blocker(self, key: str, value: str) -> str | None:

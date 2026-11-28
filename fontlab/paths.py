@@ -22,8 +22,8 @@ class Paths:
     # --- inputs -------------------------------------------------------------
     @property
     def sources(self) -> Path:
-        """Unmodified font files: <family>/400 is the full family, <family>/<weight>
-        holds only the faces that differ at that weight (Regular and Italic)."""
+        """Unmodified font files, one folder per package: 400/ the stock family,
+        variable/ the variable fonts heavier weights are made from (packages.py)."""
         return self.home / ".local/share/fontlab/sources"
 
     @property

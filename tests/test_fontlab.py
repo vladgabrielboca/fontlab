@@ -36,9 +36,8 @@ class TempHome(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def fake_builder(self, args: list[str], stdin: str | None = None) -> None:
-        """builders/run.py build: "<weight> <name>" for a rebuilt face, "dark " in front when darkened."""
-        self.assertEqual(args, ["build"])
+    def fake_builder(self, stdin: str) -> None:
+        """builders/run.py: "<weight> <name>" for a rebuilt face, "dark " in front when darkened."""
         jobs = [json.loads(line) for line in (stdin or "").splitlines()]
         for j in jobs:
             text = f"{int(j['wght'])} {Path(j['src']).name}" if j.get("variable") else Path(j["src"]).read_text()
@@ -56,7 +55,7 @@ class TempHome(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content or path.name)
 
-    def fake_package(self, pid: str, files: list[str] = (), replaces=(), version="1", variable=True) -> None:
+    def fake_package(self, pid: str, files: list[str] = (), version="1", variable=True) -> None:
         """files go in 400/. variable: also the variable fonts heavier weights need."""
         root = paths.P.sources / pid
         for name in files:
@@ -65,7 +64,7 @@ class TempHome(unittest.TestCase):
             for name in BY_ID[pid].VARIABLE:
                 self.fake_font(root / "variable" / name)
         root.mkdir(parents=True, exist_ok=True)
-        (root / "manifest.json").write_text(json.dumps({"version": version, "replaces": list(replaces)}))
+        (root / "manifest.json").write_text(json.dumps({"version": version}))
 
 
 class SettingsTest(unittest.TestCase):
@@ -166,14 +165,14 @@ class AvailabilityTest(TempHome):
         (self.home / ".config/vesktop/settings").mkdir(parents=True)
         self.assertIsNone(Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
 
-    def test_weight_choices_follow_manifest(self) -> None:
-        self.fake_package("inter", ["Inter-Regular.ttf"], variable=False)   # installed before 2026-11-28
+    def test_weight_choices_follow_package(self) -> None:
         ctx = Context.detect()
         self.assertEqual(ctx.choices(BY_KEY["ui_weight"]), ["400"])
-        self.assertIn("fontlab fonts install inter", ctx.choice_blocker(BY_KEY["ui_weight"], "450"))
-        self.assertIn("inter", ctx.choices(BY_KEY["web_fonts"]))
+        self.assertIn("Inter", ctx.choice_blocker(BY_KEY["ui_weight"], "450"))
         self.fake_package("inter", ["Inter-Regular.ttf"])
-        self.assertEqual(Context.detect().choices(BY_KEY["ui_weight"]), list(BY_KEY["ui_weight"].choices))
+        ctx = Context.detect()
+        self.assertEqual(ctx.choices(BY_KEY["ui_weight"]), list(BY_KEY["ui_weight"].choices))
+        self.assertIn("inter", ctx.choices(BY_KEY["web_fonts"]))
 
     def test_old_manifest_still_loads(self) -> None:
         self.fake_package("inter", ["Inter-Regular.ttf"], variable=False)
@@ -181,14 +180,12 @@ class AvailabilityTest(TempHome):
         f.write_text(json.dumps({"version": "4.1", "weights": ["400", "450"], "replaces": [], "build": 0,
                                  "inputs": {}}))
         self.assertEqual(BY_ID["inter"].manifest().version, "4.1")
-        self.assertFalse(BY_ID["inter"].has_weights())
 
 
 class FontsTest(TempHome):
     def setUp(self) -> None:
         super().setUp()
-        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Italic.ttf", "Inter-Bold.ttf"],
-                          replaces=["/usr/share/fonts/inter/Inter.ttc"])
+        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Italic.ttf", "Inter-Bold.ttf"])
         self.jbm = str(self.fake_jbm_system())
         self.fake_package("jbm")
         self.fake_package("googlesans", ["GoogleSansFlex.ttf"])
@@ -226,6 +223,14 @@ class FontsTest(TempHome):
     def test_missing_package_installs_nothing(self) -> None:
         fonts.install(dict(DEFAULTS))
         self.assertFalse(self.installed("windows").exists())
+
+    def test_system_copy_installed_later_is_hidden(self) -> None:
+        ttc = self.system_fonts / "inter/Inter.ttc"
+        sets = fonts.install(dict(DEFAULTS))[1]
+        self.assertNotIn(str(ttc), [g for fs in sets for g in fs.rejects])
+        self.fake_font(ttc)                               # the distro's Inter, after fontlab's
+        sets = fonts.plan(dict(DEFAULTS))
+        self.assertIn(str(ttc), [g for fs in sets for g in fs.rejects])
 
     def test_install_replaces_whole_family(self) -> None:
         st = dict(DEFAULTS, ui_weight="450", mono_weight="475")
@@ -471,8 +476,7 @@ class CompareTest(TempHome):
     def test_preset_window_uses_its_own_files(self) -> None:
         from unittest import mock
         from fontlab import preview
-        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Bold.ttf"],
-                          replaces=["/usr/share/fonts/inter/Inter.ttc"])
+        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Bold.ttf"])
         self.fake_font(paths.P.shim)
         self.fake_font(paths.P.fontconfig_dir / "10-mine.conf")
         self.fake_font(paths.P.web_conf)

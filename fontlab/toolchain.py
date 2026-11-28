@@ -55,11 +55,11 @@ def fonttools_source() -> str:
     return "private venv (created on first use)"
 
 
-def run_builder(args: list[str], stdin: str | None = None) -> None:
-    result = subprocess.run([*fonttools_python(), str(BUILDER), *args],
-                            input=stdin, text=True, capture_output=True)
+def run_builder(stdin: str) -> None:
+    """Run builders/run.py with JSON build jobs on stdin."""
+    result = subprocess.run([*fonttools_python(), str(BUILDER)], input=stdin, text=True, capture_output=True)
     if result.returncode != 0:
-        raise ToolError(f"font build failed ({args[0]}):\n{result.stderr.strip()[-2000:]}")
+        raise ToolError(f"font build failed:\n{result.stderr.strip()[-2000:]}")
 
 
 Progress = Callable[[str], None]

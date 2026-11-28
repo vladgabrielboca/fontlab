@@ -29,6 +29,9 @@ fontlab/
   paths.py                   Every input, output, and cache path on paths.P
   availability.py            Context.detect(): gates settings/choices on installed packages and shim
   packages.py                Download/import stock files and manifests (inter, jbm, googlesans, windows)
+  download.py                HTTPS fetch with progress and SHA-256 check
+  toolchain.py               Finds a Python with fontTools and runs builders/run.py
+  fsutil.py                  write_if_changed, replace_dir, marked-block and link helpers
   fonts.py                   Plans, builds and caches weights and darkening, atomically installs into ~/.local/share/fonts/fontlab
   fontconfig.py              Generates 70-fontlab-render.conf and 71-fontlab-web.conf
   chromium.py                Generates chromium-text.conf, chromium-fonts.conf, the uwsm/systemd LD_PRELOAD block
@@ -38,9 +41,10 @@ fontlab/
   preview.py                 Live preview and isolated compare_setup() Chromium window
   cli.py / tui.py            CLI subcommands and curses TUI
   builders/                  Runs in isolated Python with fontTools (never imports fontlab)
-    run.py                   `build` command: JSON jobs on stdin, run in parallel (weight, then darkening)
+    run.py                   JSON jobs on stdin, run in parallel (weight, then darkening)
     weights.py               Heavier faces from variable fonts: instance or graft (fontTools)
     darken.py                Python port of FreeType FT_Outline_EmboldenXY
+    hinting.py               Drops TrueType hinting that no longer fits rebuilt outlines
 chromium/
   text-shim.c                LD_PRELOAD shim (sendmsg zygote pickle + exec*/posix_spawn no-zygote)
   Makefile

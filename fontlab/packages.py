@@ -19,7 +19,7 @@ import json
 import shutil
 import tempfile
 import zipfile
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from . import paths
@@ -36,11 +36,10 @@ class PackageError(RuntimeError):
 @dataclass
 class Manifest:
     version: str
-    replaces: list[str] = field(default_factory=list)   # system files hidden while installed
 
     @classmethod
     def from_json(cls, data: dict) -> Manifest:
-        """Keys from older layouts (weights, inputs, build) are ignored."""
+        """Keys from older layouts (weights, replaces, inputs, build) are ignored."""
         return cls(**{f.name: data[f.name] for f in fields(cls) if f.name in data})
 
 
@@ -104,8 +103,7 @@ class Package:
     installs: bool = True               # False: not a desktop font (Windows fonts, Chromium only)
     weight_key: str | None = None       # setting that picks the weight; None = always 400
     darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
-    system_base: bool = False           # weight 400 is the system font itself: install nothing
-    VARIABLE: tuple[str, ...] = ()      # files in variable/ that heavier weights need
+    VARIABLE: tuple[str, ...] = ()      # files in variable/ that heavier weights are made from
 
     def install_sources(self) -> list[Source]:
         """Ways to install, first one is the default."""
@@ -131,22 +129,18 @@ class Package:
     def installed(self) -> bool:
         return self.manifest() is not None
 
-    def has_weights(self) -> bool:
-        """Whether this install can make heavier weights. Installs from before 2026-11-28
-        have no variable/ folder and need `fontlab fonts install <id>` once."""
-        return bool(self.VARIABLE) and all((self.root / "variable" / v).exists() for v in self.VARIABLE)
-
-    def base_files(self, manifest: Manifest) -> list[Path]:
-        """The stock files installed at weight 400."""
-        return [] if self.system_base else sorted((self.root / "400").glob("*.[ot]tf"))
+    def base_files(self) -> list[Path]:
+        """The stock files installed at weight 400 (none when the base is the system's copy)."""
+        return sorted((self.root / "400").glob("*.[ot]tf"))
 
     def weight_faces(self) -> list[WeightFace]:
         """The faces that change with the weight setting. Empty when it cannot."""
         return []
 
-    def replaces(self, manifest: Manifest) -> list[str]:
-        """System files hidden while this package's files are installed."""
-        return list(manifest.replaces)
+    def replaces(self) -> list[str]:
+        """System files hidden while this package's files are installed. Looked up at
+        every apply, so a system copy installed later is hidden too."""
+        return []
 
     def blocker(self, folder: Path | None = None) -> str | None:
         """Why this package cannot be installed here, or None."""
@@ -199,25 +193,22 @@ class Inter(Package):
         for v in self.VARIABLE:
             shutil.copy2(release / v, stage / "variable" / v)
         shutil.copy2(release / "LICENSE.txt", stage / "LICENSE.txt")
-        replaces = [str(p) for pat in ("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")
-                    for p in find_fonts(pat)]
-        return Manifest(self.VERSION, replaces)
+        return Manifest(self.VERSION)
 
     def weight_faces(self):
-        if not self.has_weights():
-            return []
         var, opsz = self.root / "variable", (("opsz", 14.0),)
         faces = [WeightFace(self.root / "400" / "Inter-Regular.ttf", var / "InterVariable.ttf", axes=opsz),
                  WeightFace(self.root / "400" / "Inter-Italic.ttf", var / "InterVariable-Italic.ttf", axes=opsz)]
-        return [f for f in faces if f.base.exists()]
+        return [f for f in faces if f.base.exists() and f.variable.exists()]
+
+    def replaces(self):
+        return [str(p) for pat in ("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")
+                for p in find_fonts(pat)]
 
 
 class JetBrainsMono(Package):
     id, name = "jbm", "JetBrains Mono"
-    weight_key, system_base = "mono_weight", True
-
-    def install_sources(self):
-        return [Source("Build on the installed copy")]
+    weight_key = "mono_weight"
     summary = "Heavier JetBrains Mono (or its Nerd Font) built on your installed copy."
     VERSION = "2.304"
     URL = f"https://github.com/JetBrains/JetBrainsMono/releases/download/v{VERSION}/JetBrainsMono-{VERSION}.zip"
@@ -248,13 +239,11 @@ class JetBrainsMono(Package):
     def weight_faces(self):
         """Grafted onto the installed copy, read when settings are applied: a system
         update changes its fingerprint, and fontlab rebuilds on the next apply."""
-        found = self.system_files() if self.has_weights() else None
-        if not found:
-            return []
         var = self.root / "variable"
-        return [WeightFace(base, var / v, "graft") for base, v in zip(found, self.VARIABLE)]
+        faces = [WeightFace(base, var / v, "graft") for base, v in zip(self.system_files() or (), self.VARIABLE)]
+        return [f for f in faces if f.variable.exists()]
 
-    def replaces(self, manifest):
+    def replaces(self):
         return [str(f) for f in self.system_files() or ()]
 
 

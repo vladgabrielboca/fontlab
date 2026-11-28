@@ -77,8 +77,7 @@ def _key(family: Package, inputs: list[Path], weight: str, darkening: str) -> st
 def plan(state: State) -> list[FontSet]:
     sets = []
     for family in families():
-        manifest = family.manifest()
-        if manifest is None:
+        if not family.installed:
             sets.append(FontSet(family, "", (), 0.0, ()))
             continue
         weight = state[family.weight_key] if family.weight_key else "400"
@@ -87,10 +86,10 @@ def plan(state: State) -> list[FontSet]:
             weight = "400"
         darkening = state["darkening"] if family.darkens else "0.00"
         rebuilt = {f.base for f in faces}
-        sources = [f for f in family.base_files(manifest) if f not in rebuilt]
+        sources = [f for f in family.base_files() if f not in rebuilt]
         inputs = sources + [p for f in faces for p in (f.base, f.variable)]
         sets.append(FontSet(family, _key(family, inputs, weight, darkening), tuple(sources),
-                            float(darkening), tuple(family.replaces(manifest)), weight, tuple(faces)))
+                            float(darkening), tuple(family.replaces()), weight, tuple(faces)))
     return sets
 
 
@@ -137,7 +136,7 @@ def realize(sets: list[FontSet], progress: Progress = lambda _msg: None) -> dict
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir(parents=True)
             jobs += _jobs(fs, tmp)
-        run_builder(["build"], stdin="".join(json.dumps(j) + "\n" for j in jobs))
+        run_builder(stdin="".join(json.dumps(j) + "\n" for j in jobs))
         for fs, out in pending:
             tmp = out.with_name(out.name + ".tmp")
             (tmp / MARKER).write_text(fs.key + "\n")
