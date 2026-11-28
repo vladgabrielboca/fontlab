@@ -95,7 +95,7 @@ SETTINGS: tuple[Setting, ...] = (
             "on: Discord's own font (gg sans) is replaced by your sans-serif and monospace, so the "
             "settings above reach Discord. Uses a marked block in Vencord's quickCss.css.",
             "Vesktop, Vencord, Equibop; restart the client", needs=("vencord",)),
-    # Chromium: Skia text contrast and gamma (web pages via the shim, browser UI via wrapper flags).
+    # Chromium: Skia text settings, added by the shim (preloaded into the whole login session).
     # The defaults are Chromium's own Linux values; at the defaults fontlab adds nothing.
     Setting("contrast", "Chromium", "Text contrast", steps(0, 1, 0.1, 1), "0.2",
             "Skia's text contrast. Higher = darker, crisper edges. 0.2 is Chromium's own value.",
@@ -112,11 +112,6 @@ SETTINGS: tuple[Setting, ...] = (
             "and FreeType want opposite values: slight keeps subpixel spacing, full makes glyphs "
             "land wrong.",
             "Chromium and Electron apps; restart the app", needs=("shim",)),
-    Setting("session_shim", "Chromium", "Session-wide shim", ("off", "on"), "off",
-            "on: the shim goes into LD_PRELOAD for the whole login (~/.config/uwsm/env and "
-            "systemd --user), so apps started from keybinds or terminals get the settings above too.",
-            "Chromium, Electron apps and AppImages started outside the app launcher; needs a new login",
-            needs=("shim",)),
     # System: needs sudo and a new login.
     Setting("freetype_darkening", "System", "FreeType stem darkening", ("keep", "off", "cff", "all", "strong"),
             "keep", "FREETYPE_PROPERTIES in /etc/environment. keep: fontlab leaves it alone. off: FreeType "

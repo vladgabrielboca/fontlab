@@ -27,12 +27,12 @@ You need Python 3.11 or newer and fontconfig. These are optional:
 - `uv` or `python-fonttools` builds the heavier font weights. If you have neither, fontlab sets up its own copy the first time.
 - `7z` lets fontlab download SF Pro from Apple. Without it, you can still add SF Pro from a folder.
 
-`install.sh` asks for your password once. It needs it to add small launch scripts to
-`/usr/local/bin` for Chromium, Brave, Chrome, Vivaldi, Edge, Spotify and Discord, so
-they get your settings when you start them from a terminal. If you don't want
-that, run `./install.sh --no-wrappers`.
+Log out and back in after the first install, so every app you start gets the Chromium
+settings (see [Chromium and Electron apps](#chromium-and-electron-apps)).
 
-Run `./install.sh` again after you `git pull`.
+Run `./install.sh` again after you `git pull`. If you installed fontlab before
+2026-11-28, the next run asks for your password once to remove its old launch scripts
+from `/usr/local/bin`.
 
 ## Use
 
@@ -66,7 +66,6 @@ fontlab fonts                  show fonts you can install
 fontlab fonts install inter
 fontlab preset save clear-450
 fontlab preset load clear-450
-fontlab apps                   show the Chromium and Electron apps fontlab found
 fontlab doctor                 check that everything works
 ```
 
@@ -91,7 +90,6 @@ a new terminal window for terminal fonts.
 | vencord_fonts | `on` (default) makes Vesktop and other Vencord clients use your `sans-serif` and `monospace` instead of Discord's own font, gg sans, so the settings above reach Discord. `off` removes it. Restart the client after changing it |
 | contrast, gamma | text contrast and gamma in every Chromium and Electron app. Higher gamma makes light text on dark backgrounds heavier. The defaults, 0.2 and 1.2, are Chromium's own values |
 | chromium_lcd_filter | `box` swaps Skia's subpixel filter in Chromium and Electron apps for a 1-pixel filter like Windows ClearType, so subpixel text is sharper. Works only with `antialias` `rgb` or `bgr`. The shim patches the filter in each app's memory at start, and stays loaded in the app's child processes; restart the app. `stock` (default) leaves it alone |
-| session_shim | `on` adds the shim to `LD_PRELOAD` in a marked block in `~/.config/uwsm/env` (sourced by uwsm at every login) and in `systemd --user`, so Chromium, Electron and AppImage apps launched from window-manager keybinds or terminals also get contrast, gamma and `system-ui` (needs a new login; 32-bit apps may log a harmless `wrong ELF class` warning to stderr) |
 | freetype_darkening | FreeType's own darkening for GTK and Qt apps: `off`, `cff`, `all`, or `strong`. `strong` uses [lucidglyph](https://github.com/maximilionus/lucidglyph)'s values, which keep the darkening on for bigger text. It needs sudo and a new login. The default, `keep`, leaves your system alone |
 | qt_no_synth_bold | sets `QT_NO_SYNTHESIZED_BOLD=1`, for Qt versions that draw bold variable fonts too heavy. Same sudo and login rules as above |
 
@@ -132,7 +130,7 @@ fontlab keeps your choices in `~/.config/fontlab/state.toml`. From that file it 
 - GNOME's font settings, if your desktop has them
 - `/etc/environment`, only if you change `freetype_darkening` or `qt_no_synth_bold`
 - a marked block in Vencord's `quickCss.css` (Vesktop, Vencord, Equibop), only for clients you have installed. The rest of the file stays yours
-- app launcher entries for Chromium and Electron apps, only if you change contrast or gamma (see below)
+- a marked block in `~/.config/uwsm/env` that loads the Chromium shim into your login session (see below)
 
 It never edits files in `/usr/share`. To hide a system font it replaces, it uses a
 fontconfig rule.
@@ -140,21 +138,21 @@ fontconfig rule.
 Some distros force `sans-serif` to one font. Omarchy does this with Liberation Sans.
 fontlab finds that rule and overrides it.
 
-## Contrast and gamma in every app
+## Chromium and Electron apps
 
-Chromium only takes contrast and gamma as launch flags, so fontlab has to start each
-Chromium-based app itself. Browsers, Electron apps (VS Code, Discord, Obsidian, Slack),
-AppImages and Spotify all count.
+Chromium takes contrast and gamma only as launch flags, and it doesn't pass them on to
+the processes that draw web pages. fontlab gets around this with a small library, the
+shim, which `install.sh` builds. fontlab adds it to `LD_PRELOAD` for your whole login:
+a marked block in `~/.config/uwsm/env`, which uwsm reads at every login, and the running
+`systemd --user`. So every Chromium-based app gets your settings however you start it:
+from the app launcher, a keybind, a terminal, or as an AppImage. Browsers, Electron apps
+(VS Code, Discord, Obsidian, Slack) and Spotify all count.
 
-fontlab looks through your app launcher entries and finds these apps by the files
-Chromium ships with them. For each one it writes a copy of the entry in
-`~/.local/share/applications` that starts the app through `fontlab-launch`. Run
-`fontlab apps` to see the list. If it misses an app, run `fontlab apps add NAME`. If it
-picks a wrong one, run `fontlab apps skip NAME`.
-
-While contrast and gamma stay at Chromium's values, fontlab changes no entries at all.
-Set them back to 0.2 and 1.2 and it removes its copies. Flatpak and Snap apps run in a
-sandbox that fontlab can't reach, so they keep Chromium's values.
+Every program loads the shim, and every one that isn't Chromium stops using it after
+one check. 32-bit programs can't load it and may print a harmless `wrong ELF class`
+warning. While contrast, gamma, hinting and fonts are at Chromium's own values, the
+shim changes nothing. Flatpak and Snap apps run in a sandbox that fontlab can't reach,
+so they keep Chromium's values.
 
 ## Uninstall
 

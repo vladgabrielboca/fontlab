@@ -15,6 +15,9 @@ from .settings import BY_KEY, DEFAULTS, SETTINGS
 
 State = dict[str, str]
 
+# Settings that no longer exist. Old state files and presets still load; the key is dropped.
+REMOVED = {"session_shim"}      # 2026-11-28: the session shim is always on with the shim
+
 PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -56,6 +59,8 @@ def read(path: Path) -> State:
         raw = tomllib.load(f)
     state = dict(DEFAULTS)
     for key, value in raw.items():
+        if key in REMOVED:
+            continue
         value = normalize(key, str(value))
         validate(key, value)
         state[key] = value

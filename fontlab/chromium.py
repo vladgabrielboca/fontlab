@@ -1,14 +1,19 @@
 """Chromium-family apps: browsers, Electron and CEF apps.
 
-Text contrast/gamma: the wrappers in /usr/local/bin (terminal launches) and fontlab-launch
-(desktop entries, see apps.py) source chromium-env.sh, which reads chromium-text.conf.
-The file only exists when the values differ from Chromium's own, so at the defaults
-every app renders exactly as without fontlab. It passes --text-contrast/--text-gamma on the command line (browser
-UI) and preloads the shim, which adds them to renderer launches (web pages); Chromium
-does not forward these switches to renderers by itself.
+The text shim (chromium/text-shim.c) is preloaded into the whole login session: a marked
+block in ~/.config/uwsm/env adds it to LD_PRELOAD, and the running systemd --user manager
+gets the same value. Every process loads it; all but Chromium's leave it after one check.
+It is the only way fontlab reaches these apps, however they are started (app launcher,
+keybind, terminal, AppImage). Flatpak and Snap apps run sandboxed and are out of reach.
 
-Private fontconfig (chromium_fonts_conf), set as FONTCONFIG_FILE by the shim inside the
-Chromium process only (children do not inherit it, see text-shim.c child_env), whenever web_fonts is not "system" or chromium_hinting differs from the desktop's hinting:
+Text contrast/gamma (chromium-text.conf): the shim adds --text-contrast/--text-gamma to a
+browser's own command line (browser UI) and to every renderer launch (web pages); Chromium
+does not forward these switches to renderers by itself. The file only exists when the
+values differ from Chromium's own, so at the defaults every app renders as without fontlab.
+
+Private fontconfig (chromium-fonts.conf), set as FONTCONFIG_FILE by the shim inside the
+Chromium process only (children do not inherit it, see text-shim.c child_env), whenever
+web_fonts is not "system" or chromium_hinting differs from the desktop's hinting:
 - CSS system-ui: Chromium takes it from the GTK UI font (gsettings font-name, e.g.
   "Adwaita Sans 11") and never asks fontconfig for "system-ui", so the web font rules miss
   it. The private file maps that family to the web font, for Chromium apps only; GTK apps
@@ -27,28 +32,23 @@ import subprocess
 from html import escape
 from pathlib import Path
 
-from . import apps, desktop, fontconfig, paths
+from . import desktop, fontconfig, legacy, paths
 from .fsutil import remove, replace_block, write_if_changed
 from .settings import BY_KEY, WEB_FONTS
 from .state import State
 
-# Launchers that get a wrapper when present in /usr/bin.
-APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
-        "microsoft-edge-stable", "spotify", "discord")
-WRAPPER_MARK = apps.WRAPPER_MARK
-BROWSERS = APPS[:7]   # the ones that can show a test page with --app
+# Browsers for the preview windows (they can show a test page with --app).
+BROWSERS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
+            "microsoft-edge-stable")
 
 
-def browser(real: bool = False) -> str | None:
-    """A Chromium-family browser for the preview windows, first one in BROWSERS order.
-    real=True skips fontlab's /usr/local/bin wrappers, so no live settings are added;
-    real=False prefers the wrapper, so the window gets the applied settings."""
+def browser() -> str | None:
+    """The first of BROWSERS that is installed, /usr/bin first."""
     for app in BROWSERS:
         if Path(f"/usr/bin/{app}").exists():
-            return f"/usr/bin/{app}" if real else shutil.which(app) or f"/usr/bin/{app}"
-    for app in BROWSERS:   # installed elsewhere in PATH (not through a dangling wrapper)
-        found = shutil.which(app)
-        if found and not apps.is_fontlab_wrapper(Path(found)):
+            return f"/usr/bin/{app}"
+    for app in BROWSERS:
+        if found := shutil.which(app):
             return found
     return None
 
@@ -68,11 +68,6 @@ def text_conf(state: State) -> str | None:
             and not box):
         return None
     return f"CONTRAST={state['contrast']}\nGAMMA={state['gamma']}\n" + ("LCD_FILTER=box\n" if box else "")
-
-
-def needs_launcher(state: State) -> bool:
-    """Whether Chromium-based apps must start through fontlab (text flags or private fonts)."""
-    return text_conf(state) is not None or fonts_conf(state) is not None
 
 
 def gtk_ui_family() -> str | None:
@@ -168,20 +163,7 @@ def private_fonts_conf(user_confs: list[Path] | None = None, windows: bool = Tru
             f"{body}</fontconfig>\n")
 
 
-def wrapped_apps() -> dict[str, bool]:
-    """Chromium-family launchers on this system -> whether fontlab's wrapper is active."""
-    out = {}
-    for app in APPS:
-        if not Path(f"/usr/bin/{app}").exists():
-            continue
-        wrapper = Path(f"/usr/local/bin/{app}")
-        active = (wrapper.exists() and WRAPPER_MARK in wrapper.read_text(errors="replace")
-                  and shutil.which(app) == str(wrapper))
-        out[app] = active
-    return out
-
-
-SESSION_START = "# fontlab start: session-wide Chromium shim. Turn off with: fontlab set session_shim=off"
+SESSION_START = "# fontlab start: Chromium text shim for the whole session. Remove with: fontlab uninstall"
 SESSION_END = "# fontlab end"
 _SESSION_BLOCK = re.compile(r"\n?# fontlab start[^\n]*\n.*?# fontlab end\n?", re.S)
 
@@ -192,7 +174,7 @@ def session_env_text(on: bool) -> str | None:
     or from sync_systemd_session_env."""
     if not on:
         return None
-    shim = paths.P.runtime_dir / "fontlab-text-shim.so"
+    shim = paths.P.shim
     return (f"{SESSION_START}\n"
             f'case ":${{LD_PRELOAD-}}:" in\n'
             f"  *:{shim}:*) ;;\n"
@@ -235,7 +217,7 @@ def sync_systemd_session_env(enabled: bool) -> bool:
     cur = _systemd_ld_preload()
     if cur is None:
         return False
-    shim = str(paths.P.runtime_dir / "fontlab-text-shim.so") if enabled else None
+    shim = str(paths.P.shim) if enabled else None
     want = merged_ld_preload(cur, shim)
     if (cur or None) == want:
         return False
@@ -263,7 +245,7 @@ def _compositor_has_shim() -> bool:
 
 
 def session_shim_active() -> bool:
-    """Whether the session-wide shim is active in the current graphical session."""
+    """Whether the shim is preloaded in the current graphical session."""
     return "fontlab-text-shim.so" in os.environ.get("LD_PRELOAD", "") or _compositor_has_shim()
 
 
@@ -288,19 +270,19 @@ def apply_session_env(on: bool) -> bool:
 def session_env_enabled() -> bool:
     """Whether ~/.config/uwsm/env holds fontlab's block."""
     p = paths.P.session_env_conf
-    return p.exists() and SESSION_START in p.read_text()
+    return p.exists() and _SESSION_BLOCK.search(p.read_text()) is not None
 
 
 def remove_all() -> bool:
-    """Undo everything: text and font confs, session block, wrapped desktop entries."""
+    """Undo everything: text and font confs, the session block, old launch wrappers."""
     p = paths.P
     changed = remove(p.chromium_text_conf) | remove(p.chromium_fonts_conf)
-    return changed | apply_session_env(False) | apps.apply(False)
+    return changed | apply_session_env(False) | legacy.cleanup()
 
 
 def apply(state: State, shim: bool) -> bool:
     """Returns True when something changed. Without the shim nothing could read the
-    files, and launchers must not point at a missing .so, so everything is undone."""
+    files, and LD_PRELOAD must not name a missing .so, so everything is undone."""
     if not shim:
         return remove_all()
     p = paths.P
@@ -314,6 +296,6 @@ def apply(state: State, shim: bool) -> bool:
         if state["web_fonts"] == "windows":
             env = dict(os.environ, FONTCONFIG_FILE=str(p.chromium_fonts_conf))
             subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
-    changed |= apply_session_env(state["session_shim"] == "on")
-    changed |= apps.apply(text is not None or conf is not None)
+    changed |= apply_session_env(True)
+    changed |= legacy.cleanup()
     return changed

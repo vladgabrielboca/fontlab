@@ -56,7 +56,7 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     if chromium.apply(state, ctx.shim):
         report.changed.append("chromium")
     if chromium.session_env_enabled() != had_session_env:
-        report.notices.append("session shim changed: log out and back in so your desktop picks it up")
+        report.notices.append("Chromium shim added to or removed from the session: log out and back in so every app gets it")
 
     progress("vencord")
     if vencord.apply(state):
@@ -78,7 +78,7 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
 
 def uninstall(purge: bool = False) -> list[str]:
     """Remove every output fontlab wrote. purge also removes packages, state and cache.
-    /etc/environment and the /usr/local/bin wrappers are left to uninstall.sh."""
+    /etc/environment is left as it is; uninstall.sh also removes the command and the shim."""
     p = paths.P
     removed = []
     had_session_env = chromium.session_env_enabled()

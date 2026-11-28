@@ -17,13 +17,13 @@ Use this procedure whenever you compare visual or pixel-level rendering changes 
 
 ### Headless Chromium (Fontations)
 
-- Invoke the real browser binary, never a bare name like `chromium` (which runs fontlab's `/usr/local/bin` wrapper and pulls in the user's live `chromium-text.conf` and `chromium-fonts.conf`). Get it with `python3 -c 'from fontlab import chromium; print(chromium.browser(real=True))'` from the repo root (on this machine `/usr/bin/brave-origin`; `/usr/bin/chromium` is not installed).
+- Remove `LD_PRELOAD` from the browser's environment (`env -u LD_PRELOAD ...`). The login session preloads fontlab's shim into every process, and with it the browser reads the user's live `chromium-text.conf` and `chromium-fonts.conf`. Get the browser with `python3 -c 'from fontlab import chromium; print(chromium.browser())'` from the repo root (on this machine `/usr/bin/brave-origin`; `/usr/bin/chromium` is not installed).
 - Set `TMPDIR=/tmp` and `XDG_RUNTIME_DIR=/tmp`. Longer temp paths crash Chromium with `FATAL: process_singleton_posix.cc: Socket path too long`.
 - Mirror `fontlab.preview.compare_setup()` in your temp dir:
   - Build or symlink only the font files needed for the test into `<tmp>/fonts/<family>/`.
   - Write `<tmp>/render.conf`, `<tmp>/web.conf`, and `<tmp>/fonts.conf` via `chromium.private_fonts_conf(..., extra_dirs=(font_dir,), hidden_dirs=(paths.P.installed_fonts,))`.
   - Run `fc-cache <font_dir>` with `FONTCONFIG_FILE=<tmp>/fonts.conf`.
-  - Pop `LD_PRELOAD` and `FONTLAB_TEXT_CONF` from `env`. When testing non-default `contrast`/`gamma`, write `<tmp>/chromium-text.conf`, set `FONTLAB_TEXT_CONF` and `LD_PRELOAD=~/.local/share/fontlab/runtime/fontlab-text-shim.so`, and pass `--text-contrast=<c> --text-gamma=<g>`.
+  - Pop `LD_PRELOAD` and `FONTLAB_TEXT_CONF` from `env`. When testing non-default `contrast`/`gamma`, write `<tmp>/chromium-text.conf`, and set `FONTLAB_TEXT_CONF` and `LD_PRELOAD=~/.local/share/fontlab/runtime/fontlab-text-shim.so`. The shim adds `--text-contrast`/`--text-gamma` itself.
 - Pass `--headless=new --no-first-run --no-default-browser-check --hide-scrollbars --force-device-scale-factor=1 --window-size=640,460 --user-data-dir=<tmp>/profile --screenshot=<out.png> file://<html_path>`.
 - Run a quick 3-config probe first (baseline, high gamma, heavier weight) to confirm the knobs actually change pixels before launching a large sweep.
 

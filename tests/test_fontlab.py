@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 
-from fontlab import apps, chromium, desktop, fontconfig, fonts, packages, paths, vencord
+from fontlab import chromium, desktop, fontconfig, fonts, legacy, packages, paths, vencord
 from fontlab import state as statefile
 from fontlab.availability import Context
 from fontlab.packages import BY_ID, Manifest, WindowsFonts
@@ -92,6 +92,13 @@ class StateTest(TempHome):
             statefile.validate("gamma", "9")
         with self.assertRaises(statefile.StateError):
             statefile.validate("nope", "1")
+
+    def test_removed_settings_are_dropped(self) -> None:
+        f = paths.P.state_file
+        self.fake_font(f, 'session_shim = "on"\ngamma = "1.3"\n')
+        self.assertEqual(statefile.load(), dict(DEFAULTS, gamma="1.3"))
+        statefile.save(statefile.load())
+        self.assertNotIn("session_shim", f.read_text())
 
     def test_presets(self) -> None:
         st = dict(DEFAULTS, darkening="0.75")
@@ -327,7 +334,6 @@ class ChromiumTest(TempHome):
             self.assertIn("<string>SF Pro Text</string>", xml)
             self.assertIn("/50-user.conf", xml)                            # user's own rules stay
             self.assertNotIn("web-windows.conf", xml)
-            self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="sf")))
             win = chromium.fonts_conf(dict(DEFAULTS, web_fonts="windows"))
             self.assertIn("<string>Segoe UI</string>", win)
             self.assertNotIn("50-user.conf", win)
@@ -346,10 +352,8 @@ class ChromiumTest(TempHome):
     def test_chromium_hinting_can_differ(self) -> None:
         """FreeType wants full, Chromium wants slight; the second rule must win for Chromium only."""
         self.assertEqual(chromium.hint_rule(dict(DEFAULTS)), "")       # defaults agree: nothing to add
-        self.assertFalse(chromium.needs_launcher(dict(DEFAULTS)))
         full = dict(DEFAULTS, hinting="full")                          # chromium_hinting stays slight
         self.assertIn("hintslight", chromium.hint_rule(full))
-        self.assertTrue(chromium.needs_launcher(full))
         for choice in ("system", "inter", "ubuntu", "sf", "windows"):
             xml = chromium.fonts_conf(dict(full, web_fonts=choice))
             self.assertIn("<const>hintslight</const>", xml, choice)    # override is present
@@ -386,6 +390,11 @@ class ChromiumTest(TempHome):
         self.assertIn("fontlab-text-shim.so", text)
         self.assertTrue(chromium.session_env_enabled())
         self.assertFalse(chromium.apply_session_env(True))
+        old_block = text.replace(chromium.SESSION_START, "# fontlab start: an older first line")
+        conf.write_text(old_block)                              # written by an older fontlab
+        self.assertTrue(chromium.session_env_enabled())
+        self.assertTrue(chromium.apply_session_env(True))       # replaced, not added twice
+        self.assertEqual(conf.read_text(), text)
         # The block adds the shim once, also when LD_PRELOAD already has it.
         shim = str(paths.P.runtime_dir / "fontlab-text-shim.so")
         for before, after in (("", shim), ("/o.so", f"{shim}:/o.so"), (f"{shim}:/o.so", f"{shim}:/o.so")):
@@ -407,6 +416,20 @@ class ChromiumTest(TempHome):
         self.assertIsNone(chromium.merged_ld_preload("/a/fontlab-text-shim.so", None))
 
 
+class ChromiumApplyTest(TempHome):
+    def test_session_block_follows_the_shim(self) -> None:
+        conf = paths.P.session_env_conf
+        self.assertFalse(chromium.apply(dict(DEFAULTS), shim=False))
+        self.assertFalse(conf.exists())
+        self.fake_font(paths.P.shim)
+        self.assertTrue(chromium.apply(dict(DEFAULTS), shim=True))     # at the defaults too
+        self.assertIn(str(paths.P.shim), conf.read_text())
+        self.assertFalse(paths.P.chromium_text_conf.exists())          # but nothing for it to add
+        self.assertFalse(chromium.apply(dict(DEFAULTS), shim=True))
+        self.assertTrue(chromium.apply(dict(DEFAULTS), shim=False))
+        self.assertFalse(conf.exists())
+
+
 class CompareTest(TempHome):
     def test_preset_window_uses_its_own_files(self) -> None:
         from unittest import mock
@@ -414,14 +437,13 @@ class CompareTest(TempHome):
         self.fake_package("inter", {"400": ["Inter-Regular.ttf", "Inter-Bold.ttf"],
                                     "450": ["Inter-Regular.ttf"]},
                           replaces=["/usr/share/fonts/inter/Inter.ttc"])
-        for f in ("chromium-env.sh", "fontlab-text-shim.so"):
-            self.fake_font(paths.P.runtime_dir / f)
+        self.fake_font(paths.P.shim)
         self.fake_font(paths.P.fontconfig_dir / "10-mine.conf")
         self.fake_font(paths.P.web_conf)
         st = dict(DEFAULTS, ui_weight="450", web_fonts="inter", contrast="0.5")
         with mock.patch.object(preview.subprocess, "run"), \
                 mock.patch.object(chromium, "gtk_ui_family", return_value="Adwaita Sans"):
-            env, args = preview.compare_setup(st)
+            env = preview.compare_setup(st)
         d = paths.P.preview_dir / "compare"
         linked = sorted(f.name for f in (d / "fonts/inter").iterdir())
         self.assertEqual(linked, ["Inter-Bold.ttf", "Inter-Regular.ttf"])
@@ -437,17 +459,16 @@ class CompareTest(TempHome):
         self.assertIn("<string>Adwaita Sans</string>", conf)               # CSS system-ui -> Inter
         self.assertEqual(env["FONTCONFIG_FILE"], str(d / "fonts.conf"))
         self.assertIn("CONTRAST=0.5", Path(env["FONTLAB_TEXT_CONF"]).read_text())
-        self.assertEqual(args, ["--text-contrast=0.5", "--text-gamma=1.2"])
+        self.assertEqual(env["LD_PRELOAD"], str(paths.P.shim))
 
     def test_default_text_values_skip_the_shim(self) -> None:
         from unittest import mock
         from fontlab import preview
         with mock.patch.object(preview.subprocess, "run"), \
                 mock.patch.dict(os.environ, {"LD_PRELOAD": "x.so", "FONTLAB_TEXT_CONF": "y"}):
-            env, args = preview.compare_setup(dict(DEFAULTS))
+            env = preview.compare_setup(dict(DEFAULTS))
         self.assertNotIn("LD_PRELOAD", env)
         self.assertNotIn("FONTLAB_TEXT_CONF", env)
-        self.assertEqual(args, [])
 
 
 class ShellNoticeTest(TempHome):
@@ -469,21 +490,18 @@ class ShellNoticeTest(TempHome):
 class ChromiumDefaultsTest(TempHome):
     def test_chromium_values_add_nothing(self) -> None:
         self.assertIsNone(chromium.text_conf(dict(DEFAULTS)))
-        self.assertFalse(chromium.needs_launcher(dict(DEFAULTS)))
+        self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS)))
         self.assertIn("GAMMA=1.4", chromium.text_conf(dict(DEFAULTS, gamma="1.4")))
-        self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="windows")))
+        self.assertIsNotNone(chromium.fonts_conf(dict(DEFAULTS, web_fonts="windows")))
 
     def test_lcd_filter_needs_subpixel_text(self) -> None:
-        for f in ("chromium-env.sh", "fontlab-text-shim.so"):
-            (paths.P.runtime_dir).mkdir(parents=True, exist_ok=True)
-            (paths.P.runtime_dir / f).write_text("x")
+        self.fake_font(paths.P.shim)
         box = dict(DEFAULTS, chromium_lcd_filter="box")
         effective, notices = Context.detect().effective(box)
         self.assertIsNone(chromium.text_conf(effective))    # grayscale: locked to stock
         self.assertEqual(notices, [])
         self.assertEqual(chromium.text_conf(dict(box, antialias="rgb")),
                          "CONTRAST=0.2\nGAMMA=1.2\nLCD_FILTER=box\n")
-        self.assertTrue(chromium.needs_launcher(dict(box, antialias="bgr")))
         self.assertNotIn("LCD_FILTER", chromium.text_conf(dict(DEFAULTS, antialias="rgb", gamma="1.6")))
 
     def test_shim_lcd_tables_keep_ink(self) -> None:
@@ -499,90 +517,36 @@ class ChromiumDefaultsTest(TempHome):
             self.assertEqual(rows[2], rows[0][::-1], name)
 
 
-class AppsTest(TempHome):
-    def setUp(self) -> None:
-        super().setUp()
-        self.fake_font(paths.P.launcher, "#!/bin/sh")
-        app = self.home / "opt/electronapp"
-        for n in ("icudtl.dat", "resources.pak", "electronapp"):
-            self.fake_font(app / n)
-        self.system = self.home / "share"
-        self.desktop(self.system / "applications/electronapp.desktop", f"{app}/electronapp %U")
-        self.desktop(self.system / "applications/editor.desktop", "/nonexistent/editor %F")
-        self.user_entry = self.desktop(paths.P.applications_dir / "mine.desktop",
-                                       f'"{app}/electronapp" --profile x', extra="DBusActivatable=true\n")
-        self._old = os.environ.get("XDG_DATA_DIRS")
-        os.environ["XDG_DATA_DIRS"] = str(self.system)
+class LegacyCleanupTest(TempHome):
+    """Desktop entries wrapped by the fontlab-launch route (before 2026-11-28) go back."""
 
-    def tearDown(self) -> None:
-        if self._old is None:
-            os.environ.pop("XDG_DATA_DIRS", None)
-        else:
-            os.environ["XDG_DATA_DIRS"] = self._old
-        super().tearDown()
-
-    def desktop(self, path: Path, exec_line: str, extra: str = "") -> str:
-        text = f"[Desktop Entry]\nType=Application\nName={path.stem}\nExec={exec_line}\n{extra}" \
-               f"[Desktop Action new]\nExec={exec_line} --new\n"
-        self.fake_font(path, text)
-        return text
-
-    def test_detects_only_chromium_apps(self) -> None:
-        found = {a.entry.id: a.reason for a in apps.scan()}
-        self.assertTrue(found["electronapp.desktop"])
-        self.assertTrue(found["mine.desktop"])
-        self.assertIsNone(found["editor.desktop"])
-
-    def test_wrap_and_undo(self) -> None:
-        launcher = str(paths.P.launcher)
-        self.assertTrue(apps.apply(True))
-        copy = (paths.P.applications_dir / "electronapp.desktop").read_text()
-        self.assertEqual(copy.count(f"Exec={launcher} "), 2)
-        self.assertIn("X-Fontlab-Source=", copy)
-        mine = (paths.P.applications_dir / "mine.desktop").read_text()
-        self.assertIn(f'Exec={launcher} "', mine)
-        self.assertNotIn("DBusActivatable", mine)
-        self.assertFalse((paths.P.applications_dir / "editor.desktop").exists())
-        self.assertFalse(apps.apply(True))                   # nothing left to do
-
-        self.assertTrue(apps.apply(False))
-        self.assertFalse((paths.P.applications_dir / "electronapp.desktop").exists())
-        self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), self.user_entry)
-        self.assertFalse((paths.P.desktop_backup / "mine.desktop").exists())
-
-    def test_apps_without_chromium_files_are_reported(self) -> None:
-        from unittest import mock
-        apps.save_choices({"add": ["editor"], "skip": []})
-        bare = self.home / "bin/editor"
-        self.fake_font(bare, "ELF")
-        real = self.home / "opt/electronapp/electronapp"
-        with mock.patch.object(apps, "resolve", lambda prog: bare if "editor" in prog else real):
-            names = [a.entry.id for a in apps.shim_unverified(apps.scan())]
-        self.assertEqual(names, ["editor.desktop"])
-
-    def test_entry_reaching_a_wrapper_is_left_alone(self) -> None:
-        from unittest import mock
-        self.desktop(self.system / "applications/browser.desktop", "browser %U")
-        wrapper = "/usr/local/bin/browser"
-        with mock.patch.object(apps, "resolve", lambda prog: self.home / "opt/electronapp/electronapp"), \
-                mock.patch.object(apps.shutil, "which", lambda prog: wrapper if prog == "browser" else None), \
-                mock.patch.object(apps, "is_fontlab_wrapper", lambda p: str(p) == wrapper):
-            found = {a.entry.id: a for a in apps.scan()}
-            self.assertTrue(found["browser.desktop"].via_wrapper)
-            apps.apply(True)
-        self.assertFalse((paths.P.applications_dir / "browser.desktop").exists())
-        self.assertTrue((paths.P.applications_dir / "electronapp.desktop").exists())
-
-    def test_skip_and_rewritten_entry(self) -> None:
-        apps.save_choices({"add": [], "skip": ["electronapp.desktop"]})
-        apps.apply(True)
-        self.assertFalse((paths.P.applications_dir / "electronapp.desktop").exists())
-        # an app updater rewrites the user's entry: the new text becomes the original
-        new = self.desktop(paths.P.applications_dir / "mine.desktop", f"{self.home}/opt/electronapp/electronapp")
-        apps.apply(True)
-        self.assertEqual((paths.P.desktop_backup / "mine.desktop").read_text(), new)
-        apps.apply(False)
-        self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), new)
+    def test_wrapped_entries_are_restored(self) -> None:
+        p = paths.P
+        launcher = p.runtime_dir / "fontlab-launch"
+        original = "[Desktop Entry]\nType=Application\nName=Mine\nExec=/opt/app/app %U\n"
+        mine = p.applications_dir / "mine.desktop"
+        self.fake_font(mine, f"[Desktop Entry]\n{legacy.MARK}\nType=Application\nName=Mine\n"
+                             f"Exec={launcher} /opt/app/app %U\n")
+        self.fake_font(p.desktop_backup / "mine.desktop", original)
+        copy = p.applications_dir / "sys.desktop"
+        self.fake_font(copy, f"[Desktop Entry]\n{legacy.MARK}\n{legacy.SOURCE_KEY}/usr/share/applications/sys.desktop\n"
+                             f"Exec={launcher} sys\n")
+        nobackup = p.applications_dir / "kept.desktop"
+        self.fake_font(nobackup, f"[Desktop Entry]\n{legacy.MARK}\nExec={launcher} kept --x\n")
+        other = p.applications_dir / "other.desktop"
+        self.fake_font(other, "[Desktop Entry]\nExec=other\n")
+        copied = p.applications_dir / "copied.desktop"          # no mark: copied by another tool
+        self.fake_font(copied, f'[Desktop Entry]\nExec={launcher} "/opt/x y/app" %U\n')
+        self.fake_font(p.config_dir / "apps.json", "{}")
+        self.assertTrue(legacy.cleanup())
+        self.assertEqual(copied.read_text(), '[Desktop Entry]\nExec="/opt/x y/app" %U\n')
+        self.assertEqual(mine.read_text(), original)
+        self.assertFalse(copy.exists())
+        self.assertEqual(nobackup.read_text(), "[Desktop Entry]\nExec=kept --x\n")
+        self.assertEqual(other.read_text(), "[Desktop Entry]\nExec=other\n")
+        self.assertFalse(p.desktop_backup.exists())
+        self.assertFalse((p.config_dir / "apps.json").exists())
+        self.assertFalse(legacy.cleanup())
 
 
 class VencordTest(TempHome):
@@ -688,18 +652,6 @@ class ShimEnvironmentTest(TempHome):
         env = {k: v for k, v in os.environ.items() if k not in ("FONTCONFIG_FILE", "LD_PRELOAD")}
         return env | {"HOME": str(self.home)} | extra
 
-    def test_launcher_preloads_shim_without_exporting_fontconfig(self) -> None:
-        runtime = paths.P.runtime_dir
-        self.fake_font(runtime / "fontlab-text-shim.so")
-        env_sh = self.REPO / "chromium/chromium-env.sh"
-        out = subprocess.run(["sh", "-c", f'. "{env_sh}"; printf "%s|%s" "$LD_PRELOAD" "${{FONTCONFIG_FILE-unset}}"'],
-                             env=self.env(), capture_output=True, text=True).stdout
-        self.assertEqual(out, f"{runtime / 'fontlab-text-shim.so'}|unset")
-        self.conf.unlink()
-        out = subprocess.run(["sh", "-c", f'. "{env_sh}"; printf "%s" "${{LD_PRELOAD-unset}}"'],
-                             env=self.env(), capture_output=True, text=True).stdout
-        self.assertEqual(out, "unset")
-
     @unittest.skipUnless(shutil.which("cc"), "needs a C compiler")
     def test_children_do_not_inherit_private_fontconfig(self) -> None:
         so = self.home / "shim.so"
@@ -717,30 +669,32 @@ class ShimEnvironmentTest(TempHome):
         self.assertEqual(run(), f"{self.conf}|0")                    # app has it, child does not
         self.assertEqual(run(FONTCONFIG_FILE="/mine.conf"), "/mine.conf|1")   # user's own value stays
 
-
-class AppImageProbeTest(TempHome):
-    def script(self, body: str) -> Path:
-        p = self.home / "Thing.AppImage"
-        p.write_text("#!/bin/sh\n" + body + "\n")
-        p.chmod(0o755)
-        return p
-
-    def test_runtime_that_ignores_mount_times_out(self) -> None:
-        import time
-        p = self.script("sleep 30")
-        start = time.monotonic()
-        self.assertIsNone(apps.Detector.check_appimage(p, timeout=0.5))
-        self.assertLess(time.monotonic() - start, 5)
-
-    def test_empty_output_is_not_the_current_folder(self) -> None:
-        self.assertIsNone(apps.Detector.check_appimage(self.script("echo; sleep 30"), timeout=2))
-
-    def test_mounted_electron_app(self) -> None:
-        mount = self.home / "mnt"
+    @unittest.skipUnless(shutil.which("cc"), "needs a C compiler")
+    def test_browser_gets_flags_on_its_own_command_line(self) -> None:
+        so = self.home / "shim.so"
+        subprocess.run(["cc", "-O2", "-shared", "-fPIC", "-o", str(so),
+                        str(self.REPO / "chromium/text-shim.c"), "-ldl"], check=True)
+        d = self.home / "browser"
+        d.mkdir()
+        for name in ("chromium", "electronapp"):          # echo, laid out like a Chromium install
+            shutil.copy2(shutil.which("echo"), d / name)
         for n in ("icudtl.dat", "resources.pak"):
-            self.fake_font(mount / n)
-        p = self.script(f'echo "{mount}"; sleep 30')
-        self.assertEqual(apps.Detector.check_appimage(p, timeout=5), "Electron AppImage")
+            (d / n).write_text("")
+        text = self.home / "text.conf"
+        text.write_text("CONTRAST=0.5\nGAMMA=1.3\n")
+        flags = "--text-contrast=0.5 --text-gamma=1.3"
+
+        def run(prog: str, *args: str, conf: bool = True) -> str:
+            extra = {"FONTLAB_TEXT_CONF": str(text)} if conf else {}
+            return subprocess.run([str(d / prog), *args], env=self.env(LD_PRELOAD=str(so), **extra),
+                                  capture_output=True, text=True, check=True).stdout.strip()
+
+        self.assertEqual(run("chromium", "a", "b"), f"a b {flags}")
+        self.assertEqual(run("chromium", "a", "--", "b"), f"a {flags} -- b")      # switches end at --
+        self.assertEqual(run("chromium", "--type=zygote"), "--type=zygote")      # child processes
+        self.assertEqual(run("chromium", "--text-contrast=1"), "--text-contrast=1")
+        self.assertEqual(run("electronapp", "a"), "a")                          # not a browser
+        self.assertEqual(run("chromium", "a", conf=False), "a")                 # nothing to add
 
 
 class AuditFixesTest(TempHome):
@@ -781,27 +735,16 @@ class AuditFixesTest(TempHome):
 
 
 class BrowserTest(unittest.TestCase):
-    def pick(self, in_usr_bin: set[str], which: dict[str, str], real: bool):
+    def pick(self, in_usr_bin: set[str], which: dict[str, str]):
         from unittest import mock
         with mock.patch.object(Path, "exists", lambda p: str(p).startswith("/usr/bin/") and p.name in in_usr_bin), \
-                mock.patch.object(chromium.shutil, "which", lambda a: which.get(a)), \
-                mock.patch.object(chromium.apps, "is_fontlab_wrapper",
-                                  lambda p: str(p).startswith("/usr/local/bin")):
-            return chromium.browser(real=real)
+                mock.patch.object(chromium.shutil, "which", lambda a: which.get(a)):
+            return chromium.browser()
 
-    def test_dangling_chromium_wrapper_is_skipped(self) -> None:
-        which = {"chromium": "/usr/local/bin/chromium", "brave-origin": "/usr/local/bin/brave-origin"}
-        self.assertEqual(self.pick({"brave-origin"}, which, real=True), "/usr/bin/brave-origin")
-        self.assertEqual(self.pick({"brave-origin"}, which, real=False), "/usr/local/bin/brave-origin")
-
-    def test_browser_outside_usr_bin(self) -> None:
-        which = {"chromium": "/usr/local/bin/chromium", "vivaldi-stable": "/opt/bin/vivaldi-stable"}
-        self.assertEqual(self.pick(set(), which, real=True), "/opt/bin/vivaldi-stable")
-        self.assertIsNone(self.pick(set(), {"chromium": "/usr/local/bin/chromium"}, real=True))
-
-    def test_apps_are_not_preview_browsers(self) -> None:
-        self.assertNotIn("spotify", chromium.BROWSERS)
-        self.assertNotIn("discord", chromium.BROWSERS)
+    def test_usr_bin_first_then_path(self) -> None:
+        self.assertEqual(self.pick({"brave-origin"}, {"chromium": "/opt/bin/chromium"}), "/usr/bin/brave-origin")
+        self.assertEqual(self.pick(set(), {"vivaldi-stable": "/opt/bin/vivaldi-stable"}), "/opt/bin/vivaldi-stable")
+        self.assertIsNone(self.pick(set(), {}))
 
 
 if __name__ == "__main__":

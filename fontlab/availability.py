@@ -45,8 +45,7 @@ class Context:
     @classmethod
     def detect(cls) -> Context:
         manifests = {p.id: m for p in BY_ID.values() if (m := p.manifest())}
-        runtime = paths.P.runtime_dir
-        shim = (runtime / "chromium-env.sh").exists() and (runtime / "fontlab-text-shim.so").exists()
+        shim = paths.P.shim.exists()
         return cls(manifests, shim, bool(vencord.css_files()))
 
     def has(self, need: str) -> bool:

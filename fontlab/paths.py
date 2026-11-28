@@ -3,8 +3,7 @@
 fontlab owns everything listed under "outputs" (in ~/.config/uwsm/env and Vencord's
 quickCss.css, only its own marked block). Outside these it changes only the gsettings
 font keys, and with sudo the FREETYPE_PROPERTIES and QT_NO_SYNTHESIZED_BOLD lines in
-/etc/environment. install.sh adds the /usr/local/bin wrappers.
-"""
+/etc/environment."""
 
 from __future__ import annotations
 
@@ -64,7 +63,7 @@ class Paths:
 
     @property
     def chromium_text_conf(self) -> Path:
-        """Read by chromium-env.sh (wrapper flags) and the LD_PRELOAD shim (chromium/text-shim.c)."""
+        """Read by the LD_PRELOAD shim (chromium/text-shim.c)."""
         return self.config_dir / "chromium-text.conf"
 
     @property
@@ -87,28 +86,21 @@ class Paths:
 
     @property
     def runtime_dir(self) -> Path:
-        """Shim library and chromium-env.sh, installed by install.sh."""
+        """The Chromium text shim, fontlab-text-shim.so, installed by install.sh."""
         return self.home / ".local/share/fontlab/runtime"
 
     @property
-    def launcher(self) -> Path:
-        """Prefix fontlab puts in front of Chromium/Electron apps' desktop Exec lines."""
-        return self.runtime_dir / "fontlab-launch"
+    def shim(self) -> Path:
+        return self.runtime_dir / "fontlab-text-shim.so"
 
+    # Old launch routes, only cleaned up (legacy.py).
     @property
     def applications_dir(self) -> Path:
-        """User desktop entries. A file here hides the system entry with the same name."""
         return self.home / ".local/share/applications"
 
     @property
     def desktop_backup(self) -> Path:
-        """Originals of the user's own desktop entries that fontlab edited in place."""
         return self.home / ".local/share/fontlab/desktop-backup"
-
-    @property
-    def apps_file(self) -> Path:
-        """Apps the user added or skipped by hand: {"add": [...], "skip": [...]}."""
-        return self.config_dir / "apps.json"
 
     # --- cache --------------------------------------------------------------
     @property

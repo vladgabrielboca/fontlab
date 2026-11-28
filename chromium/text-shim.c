@@ -1,9 +1,10 @@
 // LD_PRELOAD shim for Chromium-family apps (browsers, Electron, CEF, AppImages):
-//  - injects --text-contrast/--text-gamma into renderers (Chromium does not forward these
+//  - adds --text-contrast/--text-gamma to a browser's own command line (browser UI, see
+//    __libc_start_main) and injects them into renderers (Chromium does not forward these
 //    Skia switches to renderers), via both the zygote fork socket and no-zygote exec*.
 //  - sets FONTCONFIG_FILE to ~/.config/fontlab/chromium-fonts.conf (when present and not
 //    already set), so CSS system-ui and Windows web fonts work even when an app is launched
-//    from a keybind or terminal instead of a wrapper. Only the Chromium process that loaded
+//    from a keybind, a terminal or the app launcher. Only the Chromium process that loaded
 //    the shim reads it: every exec*/posix_spawn from it drops the variable again, so a
 //    terminal, editor or helper the app starts keeps the desktop's own fontconfig.
 // Safe to load session-wide via LD_PRELOAD: non-Chromium processes exit shim_init() after
@@ -37,9 +38,13 @@ static int (*real_posix_spawn)(pid_t *, const char *, const posix_spawn_file_act
                                const posix_spawnattr_t *, char *const[], char *const[]);
 static int (*real_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_actions_t *,
                                 const posix_spawnattr_t *, char *const[], char *const[]);
+typedef int (*main_fn)(int, char **, char **);
+typedef int (*start_fn)(main_fn, int, char **, void (*)(void), void (*)(void), void (*)(void), void *);
+static start_fn real_start;
 static char extra[2][64];
 static int have_extra = 0;
 static int is_chromium = 0;
+static int is_browser = 0;   // a web browser (BROWSER_EXES), not an Electron or CEF app
 static int lcd_box = 0;
 static char fc_env[600];   // "FONTCONFIG_FILE=<path>" when the shim set it, else empty
 
@@ -140,8 +145,8 @@ static void patch_lcd_filter(void) {
   mprotect((void *)a, e - a, PROT_READ);
 }
 
-// Launchers (shell scripts, /usr/bin/chromium, AppImage runtimes, session LD_PRELOAD) pass
-// this .so on in LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps
+// The login session preloads this .so into every process (~/.config/uwsm/env and
+// systemd --user, written by fontlab); launch scripts and AppImage runtimes pass it on. The first Chromium binary (its folder holds icudtl.dat) keeps
 // the hook, sets FONTCONFIG_FILE if needed, and drops the .so from LD_PRELOAD, so zygote,
 // GPU, renderers and anything the app opens (a terminal inside an editor, say) do not load it.
 // With LCD_FILTER=box it stays: each Chromium process patches its own copy of the filter
@@ -151,6 +156,11 @@ static int file_in_dir(const char *dir, const char *name) {
   snprintf(p, sizeof p, "%s/%s", dir, name);
   return access(p, F_OK) == 0;
 }
+
+// Executable names of browsers whose own process gets --text-contrast/--text-gamma (the
+// browser UI: tabs, menus, omnibox). Electron and CEF apps draw everything in renderers,
+// and some read unknown arguments as files to open, so their command line is left alone.
+static const char *const BROWSER_EXES[] = {"chrome", "chromium", "brave", "vivaldi-bin", "msedge", 0};
 
 __attribute__((constructor)) static void shim_init(void) {
   // Resolve all wrapped libc functions up front (single-threaded) so forked children never
@@ -162,6 +172,7 @@ __attribute__((constructor)) static void shim_init(void) {
   real_execvpe = dlsym(RTLD_NEXT, "execvpe");
   real_posix_spawn = dlsym(RTLD_NEXT, "posix_spawn");
   real_posix_spawnp = dlsym(RTLD_NEXT, "posix_spawnp");
+  real_start = (start_fn)dlsym(RTLD_NEXT, "__libc_start_main");
 
   char exe[512];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
@@ -169,6 +180,8 @@ __attribute__((constructor)) static void shim_init(void) {
   exe[n] = 0;
   char *slash = strrchr(exe, '/');
   if (!slash) return;
+  for (int i = 0; BROWSER_EXES[i]; i++)
+    if (!strcmp(slash + 1, BROWSER_EXES[i])) is_browser = 1;
   *slash = 0;
   int chromium = file_in_dir(exe, "icudtl.dat") &&
                  (file_in_dir(exe, "resources.pak") || file_in_dir(exe, "v8_context_snapshot.bin"));
@@ -196,6 +209,33 @@ __attribute__((constructor)) static void shim_init(void) {
     p += k; if (*p) p++;
   }
   if (*keep) setenv("LD_PRELOAD", keep, 1); else unsetenv("LD_PRELOAD");
+}
+
+// ---- browser process: add the flags to its own command line ----
+// Chromium reads its switches from main()'s argv, so the shim hands main() a longer one.
+// ld.so runs shim_init() before the executable's _start calls this, so the config is loaded.
+// Only the browser process itself (no --type=) of a BROWSER_EXES binary, and only once.
+int __libc_start_main(main_fn main, int argc, char **argv, void (*init)(void), void (*fini)(void),
+                      void (*rtld_fini)(void), void *stack_end) {
+  start_fn real = real_start ? real_start : (start_fn)dlsym(RTLD_NEXT, "__libc_start_main");
+  if (!real) _exit(127);
+  if (!is_browser || !have_extra || !argv || argc < 1)
+    return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+  int at = argc;   // before a "--", after which Chromium reads no switches
+  for (int i = 1; i < argc; i++) {
+    if (!strncmp(argv[i], "--type=", 7) || !strncmp(argv[i], "--text-contrast", 15))
+      return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+    if (!strcmp(argv[i], "--") && at == argc) at = i;
+  }
+  char **out = malloc(sizeof *out * (size_t)(argc + 3));
+  if (!out) return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+  int n = 0;
+  for (int i = 0; i < at; i++) out[n++] = argv[i];
+  out[n++] = extra[0];
+  out[n++] = extra[1];
+  for (int i = at; i < argc; i++) out[n++] = argv[i];
+  out[n] = NULL;
+  return real(main, n, out, init, fini, rtld_fini, stack_end);
 }
 
 static size_t pad4(size_t n) { return (n + 3) & ~(size_t)3; }

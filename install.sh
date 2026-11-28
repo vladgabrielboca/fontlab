@@ -1,15 +1,13 @@
 #!/bin/bash
 # Install fontlab for this user. Safe to run again (it updates).
 #   1. check requirements
-#   2. build the Chromium text shim, copy runtime files
-#   3. link ~/.local/bin/fontlab to this checkout
-#   4. install launch wrappers for the Chromium-family apps found (sudo)
-# Options: --no-wrappers  skip step 4 (browsers started from a terminal then get no settings;
-#                          launcher entries still start through fontlab)
+#   2. link ~/.local/bin/fontlab to this checkout
+#   3. build the Chromium text shim into ~/.local/share/fontlab/runtime
+#   4. remove the launch wrappers older versions put in /usr/local/bin (sudo, once)
+#   5. fontlab apply: adds the shim to the login session (LD_PRELOAD), so log out and back in
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
 RUNTIME="$HOME/.local/share/fontlab/runtime"
-WRAPPERS=1; [ "${1:-}" = --no-wrappers ] && WRAPPERS=0
 
 python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' ||
   { echo "fontlab needs Python 3.11 or newer." >&2; exit 1; }
@@ -27,31 +25,20 @@ if ! command -v cc >/dev/null; then
 fi
 make -s -C chromium
 mkdir -p "$RUNTIME"
-install -m755 chromium/fontlab-text-shim.so "$RUNTIME/"
-install -m644 chromium/chromium-env.sh "$RUNTIME/"
-install -m755 chromium/fontlab-launch "$RUNTIME/"
-echo "runtime: $RUNTIME"
-[ $WRAPPERS = 1 ] || { echo "skipped the /usr/local/bin wrappers (--no-wrappers)"; exit 0; }
+# Replace, never overwrite in place: running processes have the old file mapped.
+install -m755 chromium/fontlab-text-shim.so "$RUNTIME/.fontlab-text-shim.so.new"
+mv -f "$RUNTIME/.fontlab-text-shim.so.new" "$RUNTIME/fontlab-text-shim.so"
+rm -f "$RUNTIME/chromium-env.sh" "$RUNTIME/fontlab-launch"     # old launch routes
+echo "shim: $RUNTIME/fontlab-text-shim.so"
 
-APPS=$(python3 -c 'import sys; sys.path.insert(0, "."); from fontlab.chromium import APPS; print(*APPS)')
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-todo=()
-for app in $APPS; do
-  [ -x "/usr/bin/$app" ] || continue
-  if [ -e "/usr/local/bin/$app" ] && ! grep -q "fontlab launch wrapper" "/usr/local/bin/$app"; then
-    echo "note: /usr/local/bin/$app exists and is not fontlab's, leaving it alone"
-    continue
-  fi
-  sed "s/@NAME@/$app/g" chromium/wrapper.sh > "$tmp/$app"
-  cmp -s "$tmp/$app" "/usr/local/bin/$app" || todo+=("$tmp/$app")
+old=()
+for f in /usr/local/bin/*; do
+  [ -f "$f" ] && grep -q "fontlab launch wrapper" "$f" 2>/dev/null && old+=("$f")
 done
-if [ ${#todo[@]} -gt 0 ]; then
-  echo "installing wrappers into /usr/local/bin (sudo): ${todo[*]##*/}"
-  sudo install -m755 "${todo[@]}" /usr/local/bin/
-else
-  echo "wrappers: up to date"
+if [ ${#old[@]} -gt 0 ]; then
+  echo "removing old fontlab wrappers from /usr/local/bin (sudo): ${old[*]##*/}"
+  sudo rm -f "${old[@]}"
 fi
-first=$(IFS=:; for d in $PATH; do case $d in /usr/local/bin|/usr/bin) echo "$d"; break;; esac; done)
-[ "$first" = /usr/local/bin ] ||
-  echo "note: /usr/local/bin must come before /usr/bin in PATH for the wrappers to run"
+
+./bin/fontlab apply
 echo "done. Run: fontlab"
