@@ -235,6 +235,49 @@ class Roboto(Package):
         return Manifest(f"{self.VERSION} {self.COMMIT[:7]}", ["400", *WEIGHTS], replaces)
 
 
+class UbuntuSans(Package):
+    id, name = "ubuntu", "Ubuntu Sans"
+    summary = ("Ubuntu's UI font (24.04 and later), built as static faces with heavier weights and "
+               "darkening. Downloaded from github.com/canonical/Ubuntu-Sans-fonts.")
+    optional = True
+    VERSION = "1.006"
+    URL = (f"https://github.com/canonical/Ubuntu-Sans-fonts/releases/download/v{VERSION}/"
+           f"UbuntuSans-fonts-{VERSION}.zip")
+    SHA256 = "20aa7af47beaa6d64327782f7bf60df375edeedbdee2fe407e0bf9721890fb83"
+    FAMILY, PREFIX = "Ubuntu Sans", "UbuntuSans"
+    VARIABLE = ("UbuntuSans[wdth,wght].ttf", "UbuntuSans-Italic[wdth,wght].ttf")
+    REPLACES = ("UbuntuSans-*.[ot]tf", "UbuntuSans[[]*.ttf")
+
+    def build(self, stage, work, progress, folder):
+        release = _extract_zip(fetch(self.URL, work / f"{self.id}.zip", progress, self.SHA256), work / self.id)
+        files = [p for p in release.rglob("*") if p.is_file() and "__MACOSX" not in p.parts]
+        found = [[p for p in files if p.name == name] for name in self.VARIABLE]
+        if not all(found):
+            raise PackageError(f"{self.name}: release has no {' or '.join(self.VARIABLE)}")
+        licence = [p for p in files if p.name == "LICENCE.txt"]
+        if licence:
+            shutil.copy2(licence[0], stage / "LICENCE.txt")
+        progress(f"building {self.name} static family")
+        run_builder(["static-family", str(found[0][0]), str(found[1][0]), self.FAMILY, self.PREFIX,
+                     str(stage), *WEIGHTS])
+        replaces = [str(p) for pat in self.REPLACES for p in find_fonts(pat)]
+        return Manifest(self.VERSION, ["400", *WEIGHTS], replaces)
+
+
+class UbuntuSansMono(UbuntuSans):
+    id, name = "ubuntumono", "Ubuntu Sans Mono"
+    summary = ("Ubuntu's monospace font, static faces with heavier weights. Downloaded from "
+               "github.com/canonical/Ubuntu-Sans-Mono-fonts. Make it the terminal font with: "
+               "omarchy font set \"Ubuntu Sans Mono\"")
+    VERSION = "1.100"
+    URL = (f"https://github.com/canonical/Ubuntu-Sans-Mono-fonts/releases/download/v{VERSION}/"
+           f"Ubuntu-Sans-Mono-fonts-v{VERSION}.zip")
+    SHA256 = "0e459ed18b552190971561b3e474d0c4583db40483debf9e951321c2a1c2dec8"
+    FAMILY, PREFIX = "Ubuntu Sans Mono", "UbuntuSansMono"
+    VARIABLE = ("UbuntuSansMono[wght].ttf", "UbuntuSansMono-Italic[wght].ttf")
+    REPLACES = ("UbuntuSansMono-*.[ot]tf", "UbuntuSansMono[[]*.ttf")
+
+
 class SFPro(Package):
     id, name = "sf", "SF Pro (Apple)"
     summary = "Apple's system fonts: SF Pro, SF Mono, New York. Downloaded from Apple, needs 7-Zip."
@@ -315,7 +358,7 @@ class WindowsFonts(Package):
 
 
 PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), GoogleSansFlex(), Roboto(),
-                                  SFPro(), WindowsFonts())
+                                  UbuntuSans(), UbuntuSansMono(), SFPro(), WindowsFonts())
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 __all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "ToolError", "WEIGHTS"]

@@ -84,26 +84,33 @@ def adwaita(system_dir, out_dir, weights):
                           400, italic, os.path.join(out_dir, str(w), src))
 
 
-# --- Roboto -------------------------------------------------------------------------
+# --- Roboto, Ubuntu Sans, Ubuntu Sans Mono ------------------------------------------
 # Normal-width (wdth=100) named instances as static files, plus heavier Regular/Italic.
 
-def roboto(regular_vf, italic_vf, out_dir, weights):
-    """<out>/400: normal-width named instances. <out>/<w>: Regular/Italic at w."""
+def static_family(regular_vf, italic_vf, family, ps_prefix, out_dir, weights):
+    """<out>/400: normal-width named instances. <out>/<w>: Regular/Italic at w.
+    Fonts without a wdth axis (Ubuntu Sans Mono) only get wght pinned."""
     for path, italic in ((regular_vf, False), (italic_vf, True)):
         meta = TTFont(path)
+        axes = {a.axisTag for a in meta["fvar"].axes}
         for inst in meta["fvar"].instances:
             loc = dict(inst.coordinates)
             if loc.get("wdth", 100.0) != 100.0:
                 continue
             style = meta["name"].getDebugName(inst.subfamilyNameID)
             f = instantiateVariableFont(TTFont(path), loc)
-            _static_names(f, "Roboto", "Roboto", style, int(round(loc["wght"])), italic,
-                          os.path.join(out_dir, "400", f"Roboto-{style.replace(' ', '')}.ttf"))
+            _static_names(f, family, ps_prefix, style, int(round(loc["wght"])), italic,
+                          os.path.join(out_dir, "400", f"{ps_prefix}-{style.replace(' ', '')}.ttf"))
         for w in weights:
             style = "Italic" if italic else "Regular"
-            f = instantiateVariableFont(TTFont(path), {"wght": w, "wdth": 100.0})
-            _static_names(f, "Roboto", "Roboto", style, 400, italic,
-                          os.path.join(out_dir, str(w), f"Roboto-{style}.ttf"))
+            loc = {"wght": w, **({"wdth": 100.0} if "wdth" in axes else {})}
+            f = instantiateVariableFont(TTFont(path), loc)
+            _static_names(f, family, ps_prefix, style, 400, italic,
+                          os.path.join(out_dir, str(w), f"{ps_prefix}-{style}.ttf"))
+
+
+def roboto(regular_vf, italic_vf, out_dir, weights):
+    static_family(regular_vf, italic_vf, "Roboto", "Roboto", out_dir, weights)
 
 
 # --- JetBrains Mono -----------------------------------------------------------------

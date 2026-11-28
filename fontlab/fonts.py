@@ -47,6 +47,8 @@ FAMILIES: tuple[Family, ...] = (
     Family("sf", "sf_weight", darkens=False),
     Family("googlesans", None, darkens=False),   # stock, so it matches Google's web font
     Family("roboto", "ui_weight", darkens=True),
+    Family("ubuntu", "ui_weight", darkens=True),
+    Family("ubuntumono", "mono_weight", darkens=False),
 )
 
 

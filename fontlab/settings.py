@@ -49,18 +49,22 @@ SETTINGS: tuple[Setting, ...] = (
             "Chromium and Qt ignore it. Icon fonts are left out."),
     # Fonts: files built and installed into ~/.local/share/fonts/fontlab.
     Setting("darkening", "Fonts", "Darkening", steps(0, 1, 0.05, 2), "0.00",
-            "macOS-style stem darkening baked into Inter, Adwaita Sans and Roboto. 1 = macOS strength.",
-            needs=("inter", "adwaita", "roboto")),
+            "macOS-style stem darkening baked into Inter, Adwaita Sans, Roboto and Ubuntu Sans. "
+            "1 = macOS strength.",
+            needs=("inter", "adwaita", "roboto", "ubuntu")),
     Setting("ui_weight", "Fonts", "UI font weight", WEIGHTS, "400",
-            "Weight of Inter, Adwaita Sans and Roboto Regular/Italic. 400 = stock.",
-            needs=("inter", "adwaita", "roboto")),
-    Setting("mono_weight", "Fonts", "JetBrains Mono weight", WEIGHTS, "400",
-            "Weight of JetBrains Mono Regular/Italic. Open a new terminal window to see it.",
-            needs=("jbm",)),
+            "Weight of Inter, Adwaita Sans, Roboto and Ubuntu Sans Regular/Italic. 400 = stock.",
+            needs=("inter", "adwaita", "roboto", "ubuntu")),
+    Setting("mono_weight", "Fonts", "Monospace weight", WEIGHTS, "400",
+            "Weight of JetBrains Mono and Ubuntu Sans Mono Regular/Italic. Open a new terminal window "
+            "to see it.",
+            needs=("jbm", "ubuntumono")),
     Setting("sf_weight", "Fonts", "SF Pro Text weight", WEIGHTS, "400",
             "Weight of SF Pro Text Regular/Italic, used when web fonts = sf.", needs=("sf",)),
-    Setting("web_fonts", "Fonts", "Web and UI sans font", ("system", "inter", "sf", "windows"), "system",
+    Setting("web_fonts", "Fonts", "Web and UI sans font", ("system", "inter", "ubuntu", "sf", "windows"),
+            "system",
             "What sans-serif, system-ui, Arial etc. become. system: your distro's choice. "
+            "ubuntu: Ubuntu Sans, as on Ubuntu 24.04. "
             "windows: Chromium uses Windows 11 fonts, other apps keep Inter."),
     Setting("vencord_fonts", "Fonts", "Discord font (Vencord)", ("off", "on"), "on",
             "Vesktop and other Vencord clients: replace Discord's own font (gg sans) with your "

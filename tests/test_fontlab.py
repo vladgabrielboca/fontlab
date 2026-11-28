@@ -93,6 +93,8 @@ class AvailabilityTest(TempHome):
         st, notices = Context.detect().effective(dict(DEFAULTS, web_fonts="sf", sf_weight="450", hinting="full"))
         self.assertEqual((st["web_fonts"], st["sf_weight"], st["hinting"]), ("system", "400", "full"))
         self.assertEqual(len(notices), 2)
+        st, _ = Context.detect().effective(dict(DEFAULTS, web_fonts="ubuntu"))
+        self.assertEqual(st["web_fonts"], "system")
 
     def test_weight_choices_follow_manifest(self) -> None:
         self.fake_package("sf", {"400": ["SF-Pro-Text-Regular.otf"]})     # no variable font: 400 only
@@ -174,6 +176,24 @@ class FontsTest(TempHome):
         self.assertEqual([p.parent.name for p in gs.sources], ["400"])
         self.assertTrue(fonts.installed(sets, "googlesans"))
 
+    def test_ubuntu_sans_follows_ui_weight_mono_follows_mono_weight(self) -> None:
+        self.fake_package("ubuntu", {"400": ["UbuntuSans-Regular.ttf", "UbuntuSans-Bold.ttf"],
+                                     "450": ["UbuntuSans-Regular.ttf"]},
+                          replaces=["/usr/share/fonts/ubuntu/UbuntuSans[wdth,wght].ttf"])
+        self.fake_package("ubuntumono", {"400": ["UbuntuSansMono-Regular.ttf"],
+                                         "475": ["UbuntuSansMono-Regular.ttf"]})
+        sets = fonts.plan(dict(DEFAULTS, ui_weight="450", mono_weight="475", darkening="0.50"))
+        sans = next(fs for fs in sets if fs.family.package == "ubuntu")
+        mono = next(fs for fs in sets if fs.family.package == "ubuntumono")
+        self.assertEqual((sans.darken, mono.darken), (0.5, 0.0))
+        self.assertEqual({p.name: p.parent.name for p in sans.sources},
+                         {"UbuntuSans-Regular.ttf": "450", "UbuntuSans-Bold.ttf": "400"})
+        self.assertEqual([p.parent.name for p in mono.sources], ["475"])
+        self.assertEqual(sans.rejects, ("/usr/share/fonts/ubuntu/UbuntuSans[wdth,wght].ttf",))
+        ctx = Context.detect()
+        self.assertIn("ubuntu", ctx.choices(BY_KEY["web_fonts"]))
+        self.assertIn("475", ctx.choices(BY_KEY["mono_weight"]))
+
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
         self.fake_package("inter", {"400": ["Inter-Regular.ttf"]}, version="2")
@@ -233,6 +253,9 @@ class FontconfigTest(TempHome):
         self.assertNotIn("<string>Roboto</string>",
                          fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True, roboto=True))
         self.assertIn("SF Pro Display", fontconfig.web_conf(dict(DEFAULTS, web_fonts="sf"), True))
+        ubuntu = fontconfig.web_conf(dict(DEFAULTS, web_fonts="ubuntu"), True)
+        self.assertIn('binding="strong"><string>Ubuntu Sans</string>', ubuntu)
+        self.assertNotIn("<string>Inter</string>", ubuntu)
         # windows: other apps keep Inter when it is installed, else the system default
         self.assertIn("<string>Inter</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="windows"), True))
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS, web_fonts="windows"), False))
@@ -288,7 +311,7 @@ class ChromiumTest(TempHome):
         full = dict(DEFAULTS, hinting="full")                          # chromium_hinting stays slight
         self.assertIn("hintslight", chromium.hint_rule(full))
         self.assertTrue(chromium.needs_launcher(full))
-        for choice in ("system", "inter", "sf", "windows"):
+        for choice in ("system", "inter", "ubuntu", "sf", "windows"):
             xml = chromium.fonts_conf(dict(full, web_fonts=choice))
             self.assertIn("<const>hintslight</const>", xml, choice)    # override is present
             if choice == "windows":                                     # and comes after the render conf

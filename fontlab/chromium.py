@@ -37,7 +37,7 @@ APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-ori
         "microsoft-edge-stable", "spotify", "discord")
 WRAPPER_MARK = apps.WRAPPER_MARK
 # What CSS system-ui should be for each web_fonts choice ("system": left to the desktop).
-SYSTEM_UI = {"inter": "Inter", "sf": "SF Pro Text", "windows": "Segoe UI"}
+SYSTEM_UI = {"inter": "Inter", "ubuntu": "Ubuntu Sans", "sf": "SF Pro Text", "windows": "Segoe UI"}
 
 
 def lcd_box(state: State) -> bool:

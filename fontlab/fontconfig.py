@@ -27,6 +27,8 @@ LCDFILTER = {"default": "lcddefault", "light": "lcdlight", "legacy": "lcdlegacy"
 SANS_NAMES = ("sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Roboto", "Arial",
               "Helvetica", "Helvetica Neue", "Segoe UI")
 SF_EXTRA_NAMES = ("SF Pro", ".SF NS", "SF UI Text")
+# web_fonts choices that are one family under every sans name (sf has its own rules).
+WEB_FAMILY = {"inter": "Inter", "ubuntu": "Ubuntu Sans"}
 
 # macOS details for the SF mapping: Display at 20pt+, SF Mono and New York for their
 # generic names, and New York Small's odd Bold/Black weights fixed so bold picks Bold.
@@ -165,8 +167,8 @@ def web_conf(state: State, inter_available: bool, roboto: bool = False) -> str |
         return None
     rewrites = system_sans_rewrites()
     sans = [n for n in SANS_NAMES if not (roboto and n == "Roboto")]
-    if choice == "inter":
-        body = _aliases([*sans, *rewrites], "Inter")
+    if choice in WEB_FAMILY:
+        body = _aliases([*sans, *rewrites], WEB_FAMILY[choice])
     else:
         body = _aliases([*sans, *SF_EXTRA_NAMES, *rewrites], "SF Pro Text") + SF_RULES
     note = ("  <!-- prepend+strong keeps the rest of the list, so CJK, emoji and icons still fall back. -->\n")

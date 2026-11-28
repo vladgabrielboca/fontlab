@@ -15,10 +15,10 @@ from .packages import BY_ID, Manifest
 from .settings import BY_KEY, Setting
 from .state import State
 
-WEIGHT_PACKAGES = {"ui_weight": ("inter", "adwaita", "roboto"),
-                   "mono_weight": ("jbm",), "sf_weight": ("sf",)}
+WEIGHT_PACKAGES = {"ui_weight": ("inter", "adwaita", "roboto", "ubuntu"),
+                   "mono_weight": ("jbm", "ubuntumono"), "sf_weight": ("sf",)}
 CHOICE_PACKAGES = {("web_fonts", "inter"): "inter", ("web_fonts", "sf"): "sf",
-                   ("web_fonts", "windows"): "windows"}
+                   ("web_fonts", "ubuntu"): "ubuntu", ("web_fonts", "windows"): "windows"}
 
 
 @dataclass(frozen=True)
