@@ -34,7 +34,7 @@ import subprocess
 from html import escape
 from pathlib import Path
 
-from . import desktop, fontconfig, legacy, paths
+from . import desktop, fontconfig, paths
 from .fsutil import remove, replace_block, write_if_changed
 from .settings import BY_KEY, WEB_FONTS
 from .state import State
@@ -294,10 +294,10 @@ def session_env_enabled() -> bool:
 
 
 def remove_all() -> bool:
-    """Undo everything: text and font confs, the session block, old launch wrappers."""
+    """Undo everything: text and font confs, the session block."""
     p = paths.P
     changed = remove(p.chromium_text_conf) | remove(p.chromium_fonts_conf)
-    return changed | apply_session_env(False) | legacy.cleanup()
+    return changed | apply_session_env(False)
 
 
 def apply(state: State, shim: bool) -> bool:
@@ -317,5 +317,4 @@ def apply(state: State, shim: bool) -> bool:
             env = dict(os.environ, FONTCONFIG_FILE=str(p.chromium_fonts_conf))
             subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
     changed |= apply_session_env(True)
-    changed |= legacy.cleanup()
     return changed

@@ -32,7 +32,6 @@ fontlab/
   fonts.py                   Plans, builds and caches weights and darkening, atomically installs into ~/.local/share/fonts/fontlab
   fontconfig.py              Generates 70-fontlab-render.conf and 71-fontlab-web.conf
   chromium.py                Generates chromium-text.conf, chromium-fonts.conf, the uwsm/systemd LD_PRELOAD block
-  legacy.py                  Cleans up the pre-2026-11-28 launch routes (wrapped desktop entries)
   desktop.py                 gsettings, sudo /etc/environment, and Omarchy shell restart notice
   vencord.py                 Marked QuickCSS block for Vesktop/Vencord/Equibop
   apply.py                   Idempotent apply() and uninstall() orchestrator
@@ -57,7 +56,7 @@ python3 -m unittest discover -s tests -v
 # Rebuild the C shim without sudo
 make -C chromium
 
-# Full local install/update (rebuilds the shim, removes old /usr/local/bin wrappers, runs fontlab apply)
+# Full local install/update (rebuilds the shim, runs fontlab apply)
 ./install.sh
 
 # Inspect live system state

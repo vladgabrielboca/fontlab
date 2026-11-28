@@ -71,7 +71,7 @@ Every path `fontlab` reads or writes lives on `paths.P` (`Paths(home)`). Unit te
 
 Chromium only reads `--text-contrast` and `--text-gamma` from command-line flags and drops them when spawning renderer processes.
 
-One route loads `fontlab-text-shim.so`: `LD_PRELOAD` for the whole login, from a marked block in `~/.config/uwsm/env` plus `systemctl --user set-environment` (`chromium.apply_session_env()`), written whenever the shim is installed. Every process maps it, and all but Chromium's leave it after one `readlink` and `access()`. A new install or removal needs a new login. Until 2026-11-28 there were also `/usr/local/bin` wrappers and rewritten `.desktop` entries; `legacy.cleanup()` (on apply) and `install.sh` remove what they left.
+One route loads `fontlab-text-shim.so`: `LD_PRELOAD` for the whole login, from a marked block in `~/.config/uwsm/env` plus `systemctl --user set-environment` (`chromium.apply_session_env()`), written whenever the shim is installed. Every process maps it, and all but Chromium's leave it after one `readlink` and `access()`. A new install or removal needs a new login.
 
 Inside `chromium/text-shim.c`:
 

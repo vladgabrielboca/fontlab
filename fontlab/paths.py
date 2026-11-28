@@ -87,15 +87,6 @@ class Paths:
     def shim(self) -> Path:
         return self.runtime_dir / "fontlab-text-shim.so"
 
-    # Old launch routes, only cleaned up (legacy.py).
-    @property
-    def applications_dir(self) -> Path:
-        return self.home / ".local/share/applications"
-
-    @property
-    def desktop_backup(self) -> Path:
-        return self.home / ".local/share/fontlab/desktop-backup"
-
     # --- cache --------------------------------------------------------------
     @property
     def cache_dir(self) -> Path:

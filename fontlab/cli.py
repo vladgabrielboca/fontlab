@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from . import chromium, desktop, fonts, legacy, paths, state as statefile, toolchain
+from . import chromium, desktop, fonts, paths, state as statefile, toolchain
 from .apply import Report, apply, uninstall
 from .availability import Context
 from .download import DownloadError
@@ -172,8 +172,6 @@ def cmd_doctor(_args) -> None:
             active = chromium.session_shim_active()
             line(active, "shim preloaded in this login" if active
                  else f"shim added to {paths.P.session_env_conf}: log out and back in")
-    if old := legacy.wrappers():
-        line(False, f"old fontlab wrappers in /usr/local/bin ({' '.join(f.name for f in old)}): run install.sh")
     st = statefile.load()
     for p in PACKAGES:
         if p.installed and p.VARIABLE and not p.has_weights():

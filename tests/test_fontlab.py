@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from unittest import mock
 
-from fontlab import chromium, desktop, fontconfig, fonts, legacy, packages, paths, vencord
+from fontlab import chromium, desktop, fontconfig, fonts, packages, paths, vencord
 from fontlab import state as statefile
 from fontlab.availability import Context
 from fontlab.packages import BY_ID, Manifest, WindowsFonts
@@ -552,44 +552,6 @@ class ChromiumDefaultsTest(TempHome):
             rows = [t[0:12], t[12:24], t[24:36]]
             self.assertEqual([sum(r) for r in rows], [0x110] * 3, name)
             self.assertEqual(rows[2], rows[0][::-1], name)
-
-
-class LegacyCleanupTest(TempHome):
-    """Desktop entries wrapped by the fontlab-launch route (before 2026-11-28) go back."""
-
-    def test_wrapped_entries_are_restored(self) -> None:
-        p = paths.P
-        launcher = p.runtime_dir / "fontlab-launch"
-        original = "[Desktop Entry]\nType=Application\nName=Mine\nExec=/opt/app/app %U\n"
-        mine = p.applications_dir / "mine.desktop"
-        self.fake_font(mine, f"[Desktop Entry]\n{legacy.MARK}\nType=Application\nName=Mine\n"
-                             f"Exec={launcher} /opt/app/app %U\n")
-        self.fake_font(p.desktop_backup / "mine.desktop", original)
-        copy = p.applications_dir / "sys.desktop"
-        self.fake_font(copy, f"[Desktop Entry]\n{legacy.MARK}\n{legacy.SOURCE_KEY}/usr/share/applications/sys.desktop\n"
-                             f"Exec={launcher} sys\n")
-        nobackup = p.applications_dir / "kept.desktop"
-        self.fake_font(nobackup, f"[Desktop Entry]\n{legacy.MARK}\nExec={launcher} kept --x\n")
-        other = p.applications_dir / "other.desktop"
-        self.fake_font(other, "[Desktop Entry]\nExec=other\n")
-        copied = p.applications_dir / "copied.desktop"          # no mark: copied by another tool
-        self.fake_font(copied, f'[Desktop Entry]\nExec={launcher} "/opt/x y/app" %U\n')
-        self.fake_font(p.config_dir / "apps.json", "{}")
-        self.assertTrue(legacy.cleanup())
-        self.assertEqual(copied.read_text(), '[Desktop Entry]\nExec="/opt/x y/app" %U\n')
-        self.assertEqual(mine.read_text(), original)
-        self.assertFalse(copy.exists())
-        self.assertEqual(nobackup.read_text(), "[Desktop Entry]\nExec=kept --x\n")
-        self.assertEqual(other.read_text(), "[Desktop Entry]\nExec=other\n")
-        self.assertFalse(p.desktop_backup.exists())
-        self.assertFalse((p.config_dir / "apps.json").exists())
-        self.assertFalse(legacy.cleanup())
-
-    def test_old_session_env_file_is_removed(self) -> None:
-        old = self.home / ".config/environment.d/90-fontlab.conf"   # location before 2026-11-25
-        self.fake_font(old, "LD_PRELOAD=x\n")
-        self.assertTrue(legacy.cleanup())
-        self.assertFalse(old.exists())
 
 
 class VencordTest(TempHome):
