@@ -348,6 +348,11 @@ class ChromiumTest(TempHome):
         self.assertIn("web-windows.conf", xml)
         self.assertIn(str(paths.P.render_conf), xml)
         self.assertIn(str(paths.P.windows_fonts), xml)
+        # Mac-only names come back first after 50-omarchy.conf's Liberation Sans alias.
+        late = xml.index('mode="prepend_first" binding="strong"><string>-apple-system')
+        self.assertLess(xml.index(str(paths.P.render_conf)), late)
+        self.assertIn("BlinkMacSystemFont", xml[late:])
+        self.assertNotIn("prepend_first", chromium.private_fonts_conf(windows=False))
 
     def test_chromium_hinting_can_differ(self) -> None:
         """FreeType wants full, Chromium wants slight; the second rule must win for Chromium only."""

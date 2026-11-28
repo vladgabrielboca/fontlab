@@ -191,3 +191,23 @@ The shim and `chromium-env.sh` used to leave `FONTCONFIG_FILE=~/.config/fontlab/
 
 1. Renderers resolve families through the browser process (font IPC), so the variable is only needed in the process that loaded the shim. Dropping it from children changes nothing in pages.
 2. A fake Chromium app (a copy of `sh` next to empty `icudtl.dat` and `resources.pak`) sees the variable itself, and its `execve` children do not. A `FONTCONFIG_FILE` the user set is passed on unchanged. This is now `ShimEnvironmentTest`.
+
+## Experiment 9 (2026-11-28): `web_fonts=windows` and Mac-only CSS names
+
+The user saw Liberation Sans instead of Windows fonts on Reddit with `web_fonts=windows`. The previous session blamed `sans-serif`, using `fc-match sans-serif`. That command is wrong: `fc-match` parses `sans-serif` as family `sans` plus a size. Escaped (`fc-match 'sans\-serif'`), the private config already gave Arial.
+
+- **Setup**: `chromium.fonts_conf()` with `web_fonts=windows` written to the scratchpad, `env -u LD_PRELOAD FONTCONFIG_FILE=<conf> /opt/brave-origin-bin/brave --headless=new`, page opened over CDP, family read with `CSS.getPlatformFontsForNode`. Each Mac-only name was tested as `<name>, Georgia`.
+
+| CSS `font-family` | before | after | Chrome on Windows |
+|---|---|---|---|
+| `sans-serif` | Arial | Arial | Arial |
+| `-apple-system, Georgia` | Liberation Sans | Georgia | Georgia |
+| `BlinkMacSystemFont, Georgia` | Liberation Sans | Georgia | Georgia |
+| `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif` | Liberation Sans | Segoe UI | Segoe UI |
+| `-apple-system, sans-serif` | Liberation Sans | Arial | Arial |
+
+### Findings
+
+1. `50-omarchy.conf` aliases `-apple-system` and `BlinkMacSystemFont` to Liberation Sans with `<prefer>`. Chromium (Skia `SkFontConfigInterface_direct`) takes a font when its family equals the first family after substitution, whatever the binding, so the weak alias still wins and the rest of the CSS list is never tried.
+2. Fix: in Windows mode, `chromium.windows_late_rules()` runs after the system confs and puts the requested name first again (`prepend_first`). No font has that name, so Chromium moves to the next family. `fc-match` still prints Liberation Sans for these names, because it always returns a fallback. Only the browser shows the fix.
+3. `system-ui` stays Liberation Sans in headless Brave, because headless Chromium does not read the GTK font. In a normal window, `system_ui_rule()` maps the GTK font to Segoe UI.

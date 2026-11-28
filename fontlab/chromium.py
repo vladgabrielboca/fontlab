@@ -122,6 +122,23 @@ def fonts_conf(state: State) -> str | None:
                               purpose="Chromium-family apps (hinting, system-ui)")
 
 
+# Mac-only CSS names. Windows has no font by these names, so Chrome there skips them and
+# takes the next family in the list (usually "Segoe UI"). Omarchy's 50-omarchy.conf aliases
+# them to Liberation Sans with <prefer>, and Chromium takes any font whose family is the
+# first one after substitution, whatever the binding. Putting the name itself first again
+# matches no font, so Chromium moves on, as on Windows.
+WINDOWS_UNKNOWN = ("-apple-system", "BlinkMacSystemFont")
+
+
+def windows_late_rules() -> str:
+    """Rules that must run after the system confs in Windows mode."""
+    return ("  <!-- Mac-only names resolve to nothing, as on Windows. -->\n" + "".join(
+        '  <match target="pattern">\n'
+        f'    <test name="family" qual="any"><string>{escape(n)}</string></test>\n'
+        f'    <edit name="family" mode="prepend_first" binding="strong"><string>{escape(n)}</string></edit>\n'
+        "  </match>\n" for n in WINDOWS_UNKNOWN))
+
+
 def private_fonts_conf(user_confs: list[Path] | None = None, windows: bool = True,
                        extra_dirs: tuple[Path, ...] = (), hidden_dirs: tuple[Path, ...] = (),
                        purpose: str = "Chromium-family apps (web_fonts = windows)", rules: str = "") -> str:
@@ -132,6 +149,8 @@ def private_fonts_conf(user_confs: list[Path] | None = None, windows: bool = Tru
     p = paths.P
     windows_map = paths.DATA_DIR / "web-windows.conf"
     user = [p.render_conf] if user_confs is None else user_confs
+    if windows:
+        rules = windows_late_rules() + rules
     includes: list[Path | str] = []          # str: inline rules
     for f in sorted(paths.SYSTEM_FONTCONFIG_DIR.glob("*.conf")):
         if windows and windows_map not in includes and f.name >= "45":
