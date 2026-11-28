@@ -119,9 +119,9 @@ def cmd_fonts(args) -> None:
     if args.action is None:
         for p in PACKAGES:
             m = p.manifest()
-            outdated = bool(m and p.changed_inputs(m))
+            outdated = bool(m and p.VARIABLE and not p.has_weights())
             mark = "!" if outdated else "✓" if m else " "
-            detail = (f"{m.version}, system copy changed: fontlab fonts install {p.id}" if outdated
+            detail = (f"{m.version}, old install without heavier weights: fontlab fonts install {p.id}" if outdated
                       else m.version if m else p.unavailable() or "not installed")
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
@@ -176,8 +176,8 @@ def cmd_doctor(_args) -> None:
         line(False, f"old fontlab wrappers in /usr/local/bin ({' '.join(f.name for f in old)}): run install.sh")
     st = statefile.load()
     for p in PACKAGES:
-        if p.installed and p.changed_inputs():
-            line(False, f"font package {p.id}: system copy changed, rebuild with: fontlab fonts install {p.id}")
+        if p.installed and p.VARIABLE and not p.has_weights():
+            line(False, f"font package {p.id}: old install without heavier weights, update with: fontlab fonts install {p.id}")
         else:
             line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(st),

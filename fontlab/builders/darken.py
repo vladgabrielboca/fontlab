@@ -9,7 +9,6 @@ FT_Outline_EmboldenXY algorithm. macOS 10.13 factors (reverse-engineered by Path
 
 import math
 
-from fontTools.ttLib import TTFont
 
 from hinting import drop_hinting
 
@@ -54,11 +53,10 @@ def embolden_contour(pts, outer_cw, xs, ys):
     return out
 
 
-def darken(src, dst, xem, yem):
-    font = TTFont(src)
+def darken(font, xem, yem):
+    """Embolden a TTFont in place. Variable fonts are left as they are."""
     if "fvar" in font:
-        font.save(dst)
-        return dst
+        return font
     upem = font["head"].unitsPerEm
     xs, ys = xem * upem, yem * upem
     glyf, hmtx = font["glyf"], font["hmtx"]
@@ -84,6 +82,5 @@ def darken(src, dst, xem, yem):
             g.recalcBounds(glyf)
             hmtx[name] = (hmtx[name][0], g.xMin)
     drop_hinting(font)
-    font.save(dst)
-    return dst
+    return font
 

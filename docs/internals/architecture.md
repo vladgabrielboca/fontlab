@@ -11,7 +11,7 @@
   state.load() ──▶ Context.detect().effective(state)   (defaults for unavailable choices and locked settings)
         │
         ├──▶ 1. fonts.install(state)          ──▶ ~/.local/share/fonts/fontlab/<family>/
-        │                                         (caches darkened TTFs in ~/.cache/fontlab/builds/)
+        │                                         (builds weights and darkening, cached in ~/.cache/fontlab/builds/)
         ├──▶ 2. fontconfig.confs(state, sets) ──▶ ~/.config/fontconfig/conf.d/70-fontlab-render.conf
         │                                     ──▶ ~/.config/fontconfig/conf.d/71-fontlab-web.conf
         │       fc-cache (if fonts or conf changed; notices Omarchy shell restart if fonts changed)
@@ -50,21 +50,21 @@ Every path `fontlab` reads or writes lives on `paths.P` (`Paths(home)`). Unit te
 | Chromium | `~/.config/fontlab/chromium-fonts.conf` | Private `FONTCONFIG_FILE` for Chromium apps when `web_fonts != "system"` or `chromium_hinting` differs from `hinting`/`mono_hinting`. Maps the GTK UI font to the chosen web font so CSS `system-ui` follows `web_fonts`, and adds the Windows font dir plus `data/web-windows.conf` when `web_fonts=windows`. |
 | Runtime | `~/.local/share/fontlab/runtime/fontlab-text-shim.so` | Built and installed by `install.sh` (replaced by rename: every process in the session maps it). |
 | Session env | `~/.config/uwsm/env` | Single marked block adding the shim to `LD_PRELOAD` whenever it is installed, also synced to `systemctl --user`. |
-| Cache | `~/.cache/fontlab/builds/` | Cached darkened builds (pruned to `KEEP_BUILDS = 16` most recent). |
+| Cache | `~/.cache/fontlab/builds/` | Cached weight and darkening builds (pruned to `KEEP_BUILDS = 32` most recent). |
 | Cache | `~/.cache/fontlab/preview/` | Profiles and isolated comparison configs for `fontlab preview`. |
 | System (sudo) | `/etc/environment` | Only `FREETYPE_PROPERTIES` and `QT_NO_SYNTHESIZED_BOLD` lines touched. |
 
 ## Font packages and builders
 
-1. `packages.py` downloads or imports raw files into a staging directory, runs `builders/run.py` through `toolchain.py` (which finds a Python with `fontTools`: system, `uv`, or a venv created at `~/.local/share/fontlab/venv`), writes `manifest.json`, sets files `0o444`, and swaps the directory into `~/.local/share/fontlab/sources/<id>/`.
-   - `jbm` is built from installed system files (`built_on_system`). `manifest.json` records each input's inode, size and mtime in `inputs`; when a system update changes one, `Package.changed_inputs()` makes `fonts.plan()` install nothing for that family (so the new system font is no longer hidden) and `apply()`, `fontlab fonts`, `doctor` and the TUI say to rebuild with `fontlab fonts install <id>`. Older manifests without `inputs` fall back to comparing the replaced files' ctime with `manifest.json`'s mtime.
+1. `packages.py` downloads or imports stock files into a staging directory, writes `manifest.json`, sets files `0o444`, and swaps the directory into `~/.local/share/fontlab/sources/<id>/`. Nothing is built at install.
    - `<id>/400/` holds the stock static family (omitted for `jbm`, where the system font serves as the 400 base).
-   - `<id>/<weight>/` (`430`, `450`, `475`, `500`) holds only instanced `Regular` and `Italic` overrides, with `STAT`/`avar` removed and `name`/`OS/2`/`head` stamped as Regular/Italic so apps treat them as weight `400`.
-   - TrueType hinting bytecode differs by package:
-     - `Inter 400` keeps TT bytecode (`fpgm`, `prep`, `cvt `, `gasp`); instanced `Inter 430–500` have none.
-     - A hinted variable font without `cvar` only has bytecode for its default master, so `weights.instance()` drops it from every other instance.
-     - `JetBrains Mono 430–500` graft variable glyph outlines onto the user's installed copy (keeping Nerd Font icons) and strip bytecode (`fpgm`/`prep`/`cvt ` plus per-glyph programs).
-2. `fonts.py` plans a `FontSet` per package in `fonts.families()` (packages with `installs=True`). When `darkening > 0` on a TrueType UI family (`inter`; `googlesans` stays stock to match Google's web font), `realize()` runs `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`) into `~/.cache/fontlab/builds/<family>-<key>/`. Darkened fonts lose their TT bytecode and get `gasp` = smooth without grid fitting (`builders/hinting.py`), since the old instructions can snap the wider stems back at `hinting=full`. Bump `fonts.DARKEN_VERSION` whenever `darken.py` output changes; it is part of the cache key.
+   - `<id>/variable/` holds the variable fonts heavier weights are made from (`Package.VARIABLE`). Installs from before 2026-11-28 have per-weight folders instead and no `variable/`; they still work at 400, and `has_weights()` makes the weight settings, `fontlab fonts`, `doctor` and the TUI ask for `fontlab fonts install <id>` once. `Manifest.from_json()` ignores their old keys.
+   - `Package.weight_faces()` names the faces that change with the weight: `WeightFace(base, variable, method, axes)`. Inter: `Inter-Regular`/`Inter-Italic`, method `instance`, `opsz=14`. JetBrains Mono: the installed `JetBrainsMonoNerdFont-Regular`/`-Italic` (or plain JetBrains Mono), method `graft`, found when settings are applied, so its `replaces()` is live too.
+2. `fonts.py` plans a `FontSet` per package in `fonts.families()` (packages with `installs=True`): the stock `sources` minus the rebuilt bases, the `faces` at the chosen weight, and the darkening (`inter` only; `googlesans` stays stock to match Google's web font). The cache key hashes `BUILDER_VERSION`, the package id, weight, darkening and every input file's fingerprint (inode, size, mtime), so a reinstall or a system update of the JetBrains Mono file makes the next apply build again. `realize()` sends every family that is not cached to one `builders/run.py build` call (JSON jobs on stdin, run in a `ProcessPoolExecutor`) through `toolchain.py`, which finds a Python with `fontTools` (system, `uv`, or a venv at `~/.local/share/fontlab/venv`). Results go to `~/.cache/fontlab/builds/<family>-<key>/` (pruned to `KEEP_BUILDS = 32`). Files that need no build are hard-linked from the sources. A weight change takes about 2.5 s, darkening included.
+   - `instance`: `weights.instance()` at `wght` plus the fixed axes, then `_take_identity()` copies the stock face's `name`, `usWeightClass`, `fsSelection`, `achVendID` and `macStyle` and drops `STAT`/`avar`, so apps treat it as weight `400`. A hinted variable font without `cvar` only has bytecode for its default master, so other instances lose it.
+   - `graft`: the installed file stays the base (Nerd Font icons and patcher tables kept), glyphs the variable font also has get its outlines, and bytecode is stripped.
+   - Darkening: `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`), applied after the weight. Darkened fonts lose their TT bytecode and get `gasp` = smooth without grid fitting (`builders/hinting.py`), since the old instructions can snap the wider stems back at `hinting=full`.
+   - Bump `fonts.BUILDER_VERSION` whenever anything in `builders/` changes its output.
 3. `fonts.install()` hard-links files into a staging directory, replaces `~/.local/share/fonts/fontlab/<family>` atomically, and calls `newer_than()` to push mtime past the current whole second so `fc-cache` does not skip back-to-back applies.
 
 ## Chromium text shim (`chromium/`)

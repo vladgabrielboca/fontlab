@@ -1,30 +1,41 @@
 """Entry point for font builds. Runs in a Python that has fontTools (see toolchain.py),
-so nothing here imports fontlab. Commands:
+so nothing here imports fontlab.
 
-  run.py darken                       jobs on stdin, one per line: SRC<TAB>DST<TAB>XEM<TAB>YEM
-  run.py inter RELEASE_DIR OUT W...
-  run.py jetbrains-mono BASE_REGULAR BASE_ITALIC VARIABLE_DIR OUT W...
+  run.py build      jobs on stdin, one JSON object per line:
+                    {"out": path, "src": path, "variable": path or null, "method": "instance"
+                     or "graft", "axes": {tag: value}, "wght": number, "darken": [xem, yem] or null}
+
+With "variable", src is rebuilt at wght first (weights.at_weight). With "darken", the
+result is emboldened (darken.darken). Jobs run in parallel.
 """
 
+import json
 import sys
 from concurrent.futures import ProcessPoolExecutor
+
+from fontTools.ttLib import TTFont
 
 import darken
 import weights
 
 
+def build(job):
+    if job.get("variable"):
+        f = weights.at_weight(job["src"], job["variable"], job["method"], job.get("axes", {}), job["wght"])
+    else:
+        f = TTFont(job["src"])
+    if job.get("darken"):
+        darken.darken(f, *job["darken"])
+    f.save(job["out"])
+
+
 def main(argv):
-    cmd, args = argv[0], argv[1:]
-    if cmd == "darken":
-        jobs = [line.rstrip("\n").split("\t") for line in sys.stdin if line.strip()]
-        with ProcessPoolExecutor() as pool:
-            for f in [pool.submit(darken.darken, s, d, float(x), float(y)) for s, d, x, y in jobs]:
-                f.result()
-        return
-    nfixed = {"inter": 2, "jetbrains-mono": 4}[cmd]
-    fixed, ws = args[:nfixed], [int(w) for w in args[nfixed:]]
-    builder = {"inter": weights.inter, "jetbrains-mono": weights.jetbrains_mono}[cmd]
-    builder(*fixed, ws)
+    if argv != ["build"]:
+        sys.exit(__doc__)
+    jobs = [json.loads(line) for line in sys.stdin if line.strip()]
+    with ProcessPoolExecutor() as pool:
+        for f in [pool.submit(build, j) for j in jobs]:
+            f.result()
 
 
 if __name__ == "__main__":

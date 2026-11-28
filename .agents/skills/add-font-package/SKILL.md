@@ -9,12 +9,12 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
 
 ## Checklist
 
-1. **Builder (`fontlab/builders/weights.py` and `fontlab/builders/run.py`)** *(if instancing weights)*:
+1. **Builder (`fontlab/builders/weights.py` and `fontlab/builders/run.py`)** *(only for a new build method)*:
    - Keep `fontlab/builders/` independent of `fontlab.*` (it runs under whichever Python has `fontTools`).
    - Strip `STAT` and `avar` tables on static instances. Set `OS/2.usWeightClass`, `OS/2.fsSelection`, `head.macStyle`, and `name` IDs (`1, 2, 4, 6, 16, 17`) so apps treat heavier Regular/Italic builds as weight `400`.
    - Check whether the source has TrueType hinting tables (`fpgm`, `prep`, `cvt `, `gasp`). If outlines change without matching instructions (as in `jetbrains_mono`), strip those tables and the per-glyph programs.
-   - Register the builder command in `builders/run.py` (`nfixed` and `builder` maps).
-   - When you change an existing builder's output, installed copies keep their old files until `fontlab fonts install <id>` is run again.
+   - Most packages need no builder code: `Package.weight_faces()` returns `WeightFace(base, variable, method, axes)` entries and `weights.at_weight()` handles `instance` and `graft`. A new method goes in `at_weight()`.
+   - Bump `fonts.BUILDER_VERSION` when a builder's output changes; cached builds are then made again on the next apply.
 
 2. **Package (`fontlab/packages.py`)**:
    - Subclass `Package` with `id`, `name`, `summary`, `optional`, and `license_note` if needed.
@@ -22,7 +22,7 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
    - Override `install_sources()` when it is not a plain download (built from the installed copy, imported from a folder with `ask=True`, detected folders). The TUI and CLI only render that list.
    - These attributes are the only place package-to-setting links live: `availability.needs()`, `unlocking()`, `unlocks()` (Fonts tab) and `fonts.families()` derive from them.
    - Pin downloads with SHA-256 hashes via `download.fetch(..., sha256)`.
-   - Populate `Manifest(version, weights, replaces)`. `replaces` lists system font paths from `find_fonts()` (which excludes `paths.P.installed_fonts`) so `70-fontlab-render.conf` hides them with `<rejectfont>`.
+   - `build()` only fetches stock files: the family into `400/`, variable fonts into `variable/` (list them in `VARIABLE`). Return `Manifest(version, replaces)`. `replaces` lists system font paths from `find_fonts()` (which excludes `paths.P.installed_fonts`) so `70-fontlab-render.conf` hides them with `<rejectfont>`.
    - Append to `PACKAGES` (which builds `BY_ID`). `Package.install()` marks staged files `0o444` and swaps atomically via `replace_dir()`.
 
 3. **Fontconfig and Chromium (`fontlab/fontconfig.py` and `fontlab/chromium.py`)**:

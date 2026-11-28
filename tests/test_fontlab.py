@@ -1,5 +1,6 @@
 """Unit tests. Everything runs inside a temporary home directory; nothing here calls
-gsettings, fc-cache, sudo, the network or the font builders."""
+gsettings, fc-cache, sudo, the network or the font builders (TempHome.fake_builder
+stands in for builders/run.py)."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+from unittest import mock
 
 from fontlab import chromium, desktop, fontconfig, fonts, legacy, packages, paths, vencord
 from fontlab import state as statefile
@@ -24,22 +26,46 @@ class TempHome(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp.name)
         paths.configure(self.home)
+        self.system_fonts = self.home / "usr/share/fonts"
+        self.builds: list[list[dict]] = []
+        for patch in (mock.patch.object(packages, "SYSTEM_FONT_DIRS", (self.system_fonts,)),
+                      mock.patch.object(fonts, "run_builder", self.fake_builder)):
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
+
+    def fake_builder(self, args: list[str], stdin: str | None = None) -> None:
+        """builders/run.py build: "<weight> <name>" for a rebuilt face, "dark " in front when darkened."""
+        self.assertEqual(args, ["build"])
+        jobs = [json.loads(line) for line in (stdin or "").splitlines()]
+        for j in jobs:
+            text = f"{int(j['wght'])} {Path(j['src']).name}" if j.get("variable") else Path(j["src"]).read_text()
+            Path(j["out"]).write_text(("dark " if j.get("darken") else "") + text)
+        self.builds.append(jobs)
+
+    def fake_jbm_system(self) -> Path:
+        """The installed JetBrains Mono Nerd Font that jbm builds on. Returns the Regular."""
+        d = self.system_fonts / "TTF"
+        for name in ("JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMonoNerdFont-Italic.ttf"):
+            self.fake_font(d / name, f"400 {name}")
+        return d / "JetBrainsMonoNerdFont-Regular.ttf"
 
     def fake_font(self, path: Path, content: str = "") -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content or path.name)
 
-    def fake_package(self, pid: str, files: dict[str, list[str]], replaces=(), version="1") -> None:
+    def fake_package(self, pid: str, files: list[str] = (), replaces=(), version="1", variable=True) -> None:
+        """files go in 400/. variable: also the variable fonts heavier weights need."""
         root = paths.P.sources / pid
-        for weight, names in files.items():
-            for name in names:
-                self.fake_font(root / weight / name, f"{weight} {name}")
-        weights = sorted({"400", *files})
-        (root / "manifest.json").write_text(json.dumps(
-            {"version": version, "weights": weights, "replaces": list(replaces)}))
+        for name in files:
+            self.fake_font(root / "400" / name, f"400 {name}")
+        if variable:
+            for name in BY_ID[pid].VARIABLE:
+                self.fake_font(root / "variable" / name)
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "manifest.json").write_text(json.dumps({"version": version, "replaces": list(replaces)}))
 
 
 class SettingsTest(unittest.TestCase):
@@ -141,28 +167,61 @@ class AvailabilityTest(TempHome):
         self.assertIsNone(Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
 
     def test_weight_choices_follow_manifest(self) -> None:
-        self.fake_package("inter", {"400": ["Inter-Regular.ttf"]})        # no heavier weights built
+        self.fake_package("inter", ["Inter-Regular.ttf"], variable=False)   # installed before 2026-11-28
         ctx = Context.detect()
         self.assertEqual(ctx.choices(BY_KEY["ui_weight"]), ["400"])
+        self.assertIn("fontlab fonts install inter", ctx.choice_blocker(BY_KEY["ui_weight"], "450"))
         self.assertIn("inter", ctx.choices(BY_KEY["web_fonts"]))
+        self.fake_package("inter", ["Inter-Regular.ttf"])
+        self.assertEqual(Context.detect().choices(BY_KEY["ui_weight"]), list(BY_KEY["ui_weight"].choices))
+
+    def test_old_manifest_still_loads(self) -> None:
+        self.fake_package("inter", ["Inter-Regular.ttf"], variable=False)
+        f = paths.P.sources / "inter/manifest.json"
+        f.write_text(json.dumps({"version": "4.1", "weights": ["400", "450"], "replaces": [], "build": 0,
+                                 "inputs": {}}))
+        self.assertEqual(BY_ID["inter"].manifest().version, "4.1")
+        self.assertFalse(BY_ID["inter"].has_weights())
 
 
 class FontsTest(TempHome):
     def setUp(self) -> None:
         super().setUp()
-        self.fake_package("inter", {"400": ["Inter-Regular.ttf", "Inter-Italic.ttf", "Inter-Bold.ttf"],
-                                    "450": ["Inter-Regular.ttf", "Inter-Italic.ttf"]},
+        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Italic.ttf", "Inter-Bold.ttf"],
                           replaces=["/usr/share/fonts/inter/Inter.ttc"])
-        self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]},
-                          replaces=["/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"])
-        self.fake_package("googlesans", {"400": ["GoogleSansFlex.ttf"]})
+        self.jbm = str(self.fake_jbm_system())
+        self.fake_package("jbm")
+        self.fake_package("googlesans", ["GoogleSansFlex.ttf"])
 
     def installed(self, rel: str) -> Path:
         return paths.P.installed_fonts / rel
 
-    def test_weight_overrides_by_stem(self) -> None:
-        names = sorted((p.parent.name, p.name) for p in fonts.source_files(BY_ID["inter"], BY_ID["inter"].manifest(), "450"))
-        self.assertEqual(names, [("400", "Inter-Bold.ttf"), ("450", "Inter-Italic.ttf"), ("450", "Inter-Regular.ttf")])
+    def test_weight_rebuilds_regular_and_italic_only(self) -> None:
+        inter = next(fs for fs in fonts.plan(dict(DEFAULTS, ui_weight="450")) if fs.family.id == "inter")
+        self.assertEqual([p.name for p in inter.sources], ["Inter-Bold.ttf"])
+        self.assertEqual([f.base.name for f in inter.faces], ["Inter-Regular.ttf", "Inter-Italic.ttf"])
+        self.assertEqual(inter.faces[0].axes, (("opsz", 14.0),))
+        stock = next(fs for fs in fonts.plan(dict(DEFAULTS)) if fs.family.id == "inter")
+        self.assertEqual((len(stock.sources), stock.faces, stock.builds), (3, (), False))
+
+    def test_one_builder_run_for_every_family(self) -> None:
+        fonts.install(dict(DEFAULTS, ui_weight="450", mono_weight="475", darkening="0.50"))
+        self.assertEqual(len(self.builds), 1)
+        jobs = {Path(j["out"]).name: j for j in self.builds[0]}
+        self.assertEqual(sorted(jobs), ["Inter-Bold.ttf", "Inter-Italic.ttf", "Inter-Regular.ttf",
+                                        "JetBrainsMonoNerdFont-Italic.ttf", "JetBrainsMonoNerdFont-Regular.ttf"])
+        self.assertEqual(jobs["JetBrainsMonoNerdFont-Regular.ttf"]["method"], "graft")
+        self.assertIsNone(jobs["JetBrainsMonoNerdFont-Regular.ttf"]["darken"])   # jbm is never darkened
+        self.assertEqual(self.installed("inter/Inter-Bold.ttf").read_text(), "dark 400 Inter-Bold.ttf")
+        self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "dark 450 Inter-Regular.ttf")
+
+    def test_builds_are_cached(self) -> None:
+        st = dict(DEFAULTS, ui_weight="450")
+        fonts.install(st)
+        fonts.install(dict(DEFAULTS))
+        fonts.install(st)                                   # back to 450: cached, nothing built
+        self.assertEqual(len(self.builds), 1)
+        self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "450 Inter-Regular.ttf")
 
     def test_missing_package_installs_nothing(self) -> None:
         fonts.install(dict(DEFAULTS))
@@ -175,15 +234,16 @@ class FontsTest(TempHome):
         self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "450 Inter-Regular.ttf")
         self.assertEqual(self.installed("inter/Inter-Bold.ttf").read_text(), "400 Inter-Bold.ttf")
         rejects = [g for fs in sets for g in fs.rejects]
-        self.assertIn("/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf", rejects)
+        self.assertIn(self.jbm, rejects)
+        self.assertEqual(self.installed("jbm/JetBrainsMonoNerdFont-Regular.ttf").read_text(),
+                         "475 JetBrainsMonoNerdFont-Regular.ttf")
         self.assertFalse(fonts.install(st)[0])            # same state again: nothing to do
 
         changed, sets = fonts.install(dict(DEFAULTS))     # back to stock
         self.assertTrue(changed)
         self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "400 Inter-Regular.ttf")
         self.assertEqual(list(self.installed("jbm").iterdir()), [])  # system font is the base: no files, no reject
-        self.assertNotIn("/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf",
-                         [g for fs in sets for g in fs.rejects])
+        self.assertNotIn(self.jbm, [g for fs in sets for g in fs.rejects])
 
     def test_removing_a_package_removes_its_fonts(self) -> None:
         fonts.install(dict(DEFAULTS))
@@ -219,7 +279,8 @@ class FontsTest(TempHome):
 
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
-        self.fake_package("inter", {"400": ["Inter-Regular.ttf"]}, version="2")
+        shutil.rmtree(paths.P.sources / "inter")
+        self.fake_package("inter", ["Inter-Regular.ttf"], version="2")          # new files, new inodes
         self.assertTrue(fonts.install(dict(DEFAULTS))[0])
 
 
@@ -410,8 +471,7 @@ class CompareTest(TempHome):
     def test_preset_window_uses_its_own_files(self) -> None:
         from unittest import mock
         from fontlab import preview
-        self.fake_package("inter", {"400": ["Inter-Regular.ttf", "Inter-Bold.ttf"],
-                                    "450": ["Inter-Regular.ttf"]},
+        self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Bold.ttf"],
                           replaces=["/usr/share/fonts/inter/Inter.ttc"])
         self.fake_font(paths.P.shim)
         self.fake_font(paths.P.fontconfig_dir / "10-mine.conf")
@@ -423,7 +483,7 @@ class CompareTest(TempHome):
         d = paths.P.preview_dir / "compare"
         linked = sorted(f.name for f in (d / "fonts/inter").iterdir())
         self.assertEqual(linked, ["Inter-Bold.ttf", "Inter-Regular.ttf"])
-        self.assertIn("450", (d / "fonts/inter/Inter-Regular.ttf").resolve().parent.name)
+        self.assertEqual((d / "fonts/inter/Inter-Regular.ttf").read_text(), "450 Inter-Regular.ttf")
         conf = (d / "fonts.conf").read_text()
         self.assertIn(f"<glob>{paths.P.installed_fonts}/*</glob>", conf)
         self.assertIn(f"<dir>{d / 'fonts'}</dir>", conf)
@@ -451,7 +511,8 @@ class ShellNoticeTest(TempHome):
     def test_font_change_asks_for_a_shell_restart(self) -> None:
         from unittest import mock
         from fontlab import apply as applymod
-        self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]})
+        self.fake_jbm_system()
+        self.fake_package("jbm")
         with mock.patch.object(applymod, "fc_cache"), \
                 mock.patch.object(applymod.chromium, "apply", return_value=False), \
                 mock.patch.object(desktop, "apply_gsettings", return_value=False), \
@@ -577,41 +638,29 @@ class EnvironmentTest(unittest.TestCase):
         self.assertFalse(desktop.environment_pending(dict(DEFAULTS)))
 
 
-class StaleSystemPackageTest(TempHome):
-    """jbm is built from system files; a system update must not leave the
-    old copy installed and hiding the new one."""
+class SystemUpdateTest(TempHome):
+    """jbm is built on the installed font when settings are applied. A system update
+    gives that file a new fingerprint, and the next apply builds again."""
 
     def setUp(self) -> None:
         super().setUp()
-        self.system = self.home / "usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"
-        self.fake_font(self.system, "v1")
-        self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]}, replaces=[str(self.system)])
-        f = paths.P.sources / "jbm/manifest.json"
-        data = json.loads(f.read_text())
-        f.write_text(json.dumps(data | {"inputs": packages.fingerprints([self.system])}))
+        self.system = self.fake_jbm_system()
+        self.fake_package("jbm")
         self.state = dict(DEFAULTS, mono_weight="475")
 
-    def rejects(self) -> list[str]:
-        return [g for fs in fonts.plan(self.state) for g in fs.rejects]
-
-    def test_unchanged_input_installs(self) -> None:
-        self.assertEqual(BY_ID["jbm"].changed_inputs(), [])
-        self.assertIn(str(self.system), self.rejects())
-        self.assertEqual(packages.outdated_notices(), [])
-
-    def test_system_update_falls_back_to_the_system_font(self) -> None:
+    def test_system_update_rebuilds(self) -> None:
+        self.assertTrue(fonts.install(self.state)[0])
+        self.assertFalse(fonts.install(self.state)[0])
         self.system.unlink()                     # pacman writes a new file
         self.fake_font(self.system, "v2, longer")
-        self.assertEqual(BY_ID["jbm"].changed_inputs(), [str(self.system)])
-        self.assertNotIn(str(self.system), self.rejects())
-        jbm = next(fs for fs in fonts.plan(self.state) if fs.family.id == "jbm")
-        self.assertEqual(jbm.sources, ())
-        self.assertIn("fontlab fonts install jbm", packages.outdated_notices()[0])
+        self.assertTrue(fonts.install(self.state)[0])
+        self.assertEqual(len(self.builds), 2)
 
-    def test_downloaded_packages_never_go_stale(self) -> None:
-        self.fake_package("inter", {"400": ["Inter-Regular.ttf"]}, replaces=[str(self.system)])
-        self.system.unlink()
-        self.assertEqual(BY_ID["inter"].changed_inputs(), [])
+    def test_missing_system_font_installs_nothing(self) -> None:
+        shutil.rmtree(self.system_fonts)
+        jbm = next(fs for fs in fonts.plan(self.state) if fs.family.id == "jbm")
+        self.assertTrue(jbm.empty)
+        self.assertEqual(jbm.rejects, ())
 
 
 class ShimEnvironmentTest(TempHome):

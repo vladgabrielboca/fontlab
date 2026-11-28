@@ -28,8 +28,8 @@ fontlab/
   state.py                   state.toml and presets/<name>.toml read/write/normalize/validate
   paths.py                   Every input, output, and cache path on paths.P
   availability.py            Context.detect(): gates settings/choices on installed packages and shim
-  packages.py                Download/import/build manifests (inter, jbm, googlesans, windows)
-  fonts.py                   Plans, caches darkened builds, and atomically installs into ~/.local/share/fonts/fontlab
+  packages.py                Download/import stock files and manifests (inter, jbm, googlesans, windows)
+  fonts.py                   Plans, builds and caches weights and darkening, atomically installs into ~/.local/share/fonts/fontlab
   fontconfig.py              Generates 70-fontlab-render.conf and 71-fontlab-web.conf
   chromium.py                Generates chromium-text.conf, chromium-fonts.conf, the uwsm/systemd LD_PRELOAD block
   legacy.py                  Cleans up the pre-2026-11-28 launch routes (wrapped desktop entries)
@@ -39,8 +39,8 @@ fontlab/
   preview.py                 Live preview and isolated compare_setup() Chromium window
   cli.py / tui.py            CLI subcommands and curses TUI
   builders/                  Runs in isolated Python with fontTools (never imports fontlab)
-    run.py                   Subprocess dispatcher (darken + weight instancers)
-    weights.py               Variable-to-static weight instancers (fontTools)
+    run.py                   `build` command: JSON jobs on stdin, run in parallel (weight, then darkening)
+    weights.py               Heavier faces from variable fonts: instance or graft (fontTools)
     darken.py                Python port of FreeType FT_Outline_EmboldenXY
 chromium/
   text-shim.c                LD_PRELOAD shim (sendmsg zygote pickle + exec*/posix_spawn no-zygote)
@@ -70,7 +70,7 @@ fontlab doctor
 
 1. **Leave the user's live config untouched during tests and research.**
    - Unit tests call `paths.configure(tmp_home)`.
-   - Benchmarks run in temp directories with isolated `FONTCONFIG_FILE`, `FONTLAB_TEXT_CONF`, with `LD_PRELOAD` removed from the environment (the login session preloads the shim, which would read the live `chromium-text.conf`). Do not write to `~/.config/fontlab/state.toml` or fill `~/.cache/fontlab/builds` (`KEEP_BUILDS = 16`).
+   - Benchmarks run in temp directories with isolated `FONTCONFIG_FILE`, `FONTLAB_TEXT_CONF`, with `LD_PRELOAD` removed from the environment (the login session preloads the shim, which would read the live `chromium-text.conf`). Do not write to `~/.config/fontlab/state.toml` or fill `~/.cache/fontlab/builds` (`KEEP_BUILDS = 32`).
 
 2. **Keep `state.toml` as the single source of truth and `apply()` idempotent.**
    - Writers use `write_if_changed()` or atomic `replace_dir()`. Running `fontlab apply` twice must report `"already applied"` on the second run.

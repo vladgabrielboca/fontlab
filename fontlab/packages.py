@@ -3,10 +3,11 @@
 A package fills ~/.local/share/fontlab/sources/<id>/ and writes manifest.json there:
 
     400/        the full stock family (absent when the system font is the base)
-    <weight>/   only the faces that change at that weight (Regular, Italic)
+    variable/   variable fonts that heavier Regular/Italic faces are made from
     fonts/      flat font folder (Windows fonts)
 
-fonts.py turns these into installed fonts; it never downloads or builds weights itself.
+Packages only fetch stock files. fonts.py builds the chosen weight and darkening from
+them when settings are applied, and caches the result.
 Installs build into a stage folder and swap it in at the end, so a failed install
 leaves the previous one untouched.
 """
@@ -18,16 +19,13 @@ import json
 import shutil
 import tempfile
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 from . import paths
 from .download import fetch
 from .fsutil import replace_dir
-from .settings import WEIGHTS as ALL_WEIGHTS
-from .toolchain import Progress, ToolError, run_builder
-
-WEIGHTS = ALL_WEIGHTS[1:]        # built on top of the stock 400
+from .toolchain import Progress, ToolError
 SYSTEM_FONT_DIRS = (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))
 
 
@@ -38,11 +36,23 @@ class PackageError(RuntimeError):
 @dataclass
 class Manifest:
     version: str
-    weights: list[str] = field(default_factory=lambda: ["400"])
     replaces: list[str] = field(default_factory=list)   # system files hidden while installed
-    # System files the build read, with fingerprint(): a package update changes them.
-    inputs: dict[str, str] = field(default_factory=dict)
-    build: int = 0      # unused since 2026-11-28; old manifests still carry it
+
+    @classmethod
+    def from_json(cls, data: dict) -> Manifest:
+        """Keys from older layouts (weights, inputs, build) are ignored."""
+        return cls(**{f.name: data[f.name] for f in fields(cls) if f.name in data})
+
+
+@dataclass(frozen=True)
+class WeightFace:
+    """A stock face rebuilt at the chosen weight from a variable font. The result keeps
+    the base file's name. method "instance": a static instance named like the base.
+    "graft": the base file with the instance's outlines (keeps Nerd Font icons)."""
+    base: Path
+    variable: Path
+    method: str = "instance"
+    axes: tuple[tuple[str, float], ...] = ()    # other axes pinned, e.g. opsz
 
 
 def fingerprint(path: Path) -> str:
@@ -52,10 +62,6 @@ def fingerprint(path: Path) -> str:
     except OSError:
         return ""
     return f"{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"
-
-
-def fingerprints(files) -> dict[str, str]:
-    return {str(f): fingerprint(Path(f)) for f in files}
 
 
 def font_dirs() -> list[Path]:
@@ -99,7 +105,7 @@ class Package:
     weight_key: str | None = None       # setting that picks the weight; None = always 400
     darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
     system_base: bool = False           # weight 400 is the system font itself: install nothing
-    built_on_system: bool = False       # built from installed system files (Manifest.inputs)
+    VARIABLE: tuple[str, ...] = ()      # files in variable/ that heavier weights need
 
     def install_sources(self) -> list[Source]:
         """Ways to install, first one is the default."""
@@ -119,26 +125,28 @@ class Package:
         f = self.root / "manifest.json"
         if not f.exists():
             return None
-        return Manifest(**json.loads(f.read_text()))
+        return Manifest.from_json(json.loads(f.read_text()))
 
     @property
     def installed(self) -> bool:
         return self.manifest() is not None
 
-    def changed_inputs(self, manifest: Manifest | None = None) -> list[str]:
-        """System files this package was built from that changed or vanished since (a
-        system update). Its files are then stale and must not hide the new system font.
-        Manifests from before `inputs` existed: the replaced files, checked by ctime."""
-        manifest = manifest or self.manifest()
-        if manifest is None or not self.built_on_system:
-            return []
-        if manifest.inputs:
-            return [f for f, fp in manifest.inputs.items() if fingerprint(Path(f)) != fp]
-        try:
-            built = (self.root / "manifest.json").stat().st_mtime
-        except OSError:
-            return []
-        return [f for f in manifest.replaces if Path(f).exists() and Path(f).stat().st_ctime > built + 1]
+    def has_weights(self) -> bool:
+        """Whether this install can make heavier weights. Installs from before 2026-11-28
+        have no variable/ folder and need `fontlab fonts install <id>` once."""
+        return bool(self.VARIABLE) and all((self.root / "variable" / v).exists() for v in self.VARIABLE)
+
+    def base_files(self, manifest: Manifest) -> list[Path]:
+        """The stock files installed at weight 400."""
+        return [] if self.system_base else sorted((self.root / "400").glob("*.[ot]tf"))
+
+    def weight_faces(self) -> list[WeightFace]:
+        """The faces that change with the weight setting. Empty when it cannot."""
+        return []
+
+    def replaces(self, manifest: Manifest) -> list[str]:
+        """System files hidden while this package's files are installed."""
+        return list(manifest.replaces)
 
     def blocker(self, folder: Path | None = None) -> str | None:
         """Why this package cannot be installed here, or None."""
@@ -180,23 +188,33 @@ class Inter(Package):
     VERSION = "4.1"
     URL = f"https://github.com/rsms/inter/releases/download/v{VERSION}/Inter-{VERSION}.zip"
     SHA256 = "9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e"
+    VARIABLE = ("InterVariable.ttf", "InterVariable-Italic.ttf")
 
     def build(self, stage, work, progress, folder):
         release = _extract_zip(fetch(self.URL, work / "inter.zip", progress, self.SHA256), work / "inter")
         (stage / "400").mkdir()
         for f in (release / "extras/ttf").glob("Inter-*.ttf"):
             shutil.copy2(f, stage / "400" / f.name)
+        (stage / "variable").mkdir()
+        for v in self.VARIABLE:
+            shutil.copy2(release / v, stage / "variable" / v)
         shutil.copy2(release / "LICENSE.txt", stage / "LICENSE.txt")
-        progress("building Inter weights")
-        run_builder(["inter", str(release), str(stage), *WEIGHTS])
         replaces = [str(p) for pat in ("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")
                     for p in find_fonts(pat)]
-        return Manifest(self.VERSION, ["400", *WEIGHTS], replaces)
+        return Manifest(self.VERSION, replaces)
+
+    def weight_faces(self):
+        if not self.has_weights():
+            return []
+        var, opsz = self.root / "variable", (("opsz", 14.0),)
+        faces = [WeightFace(self.root / "400" / "Inter-Regular.ttf", var / "InterVariable.ttf", axes=opsz),
+                 WeightFace(self.root / "400" / "Inter-Italic.ttf", var / "InterVariable-Italic.ttf", axes=opsz)]
+        return [f for f in faces if f.base.exists()]
 
 
 class JetBrainsMono(Package):
     id, name = "jbm", "JetBrains Mono"
-    weight_key, system_base, built_on_system = "mono_weight", True, True
+    weight_key, system_base = "mono_weight", True
 
     def install_sources(self):
         return [Source("Build on the installed copy")]
@@ -204,6 +222,7 @@ class JetBrainsMono(Package):
     VERSION = "2.304"
     URL = f"https://github.com/JetBrains/JetBrainsMono/releases/download/v{VERSION}/JetBrainsMono-{VERSION}.zip"
     SHA256 = "6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf"
+    VARIABLE = ("JetBrainsMono[wght].ttf", "JetBrainsMono-Italic[wght].ttf")
     BASES = (("JetBrainsMonoNerdFont-Regular.ttf", "JetBrainsMonoNerdFont-Italic.ttf"),
              ("JetBrainsMono-Regular.ttf", "JetBrainsMono-Italic.ttf"))
 
@@ -218,13 +237,25 @@ class JetBrainsMono(Package):
         return None if self.system_files() else "JetBrains Mono (static Regular/Italic) is not installed"
 
     def build(self, stage, work, progress, folder):
-        regular, italic = self.system_files()
         release = _extract_zip(fetch(self.URL, work / "jbm.zip", progress, self.SHA256), work / "jbm")
-        progress("building JetBrains Mono weights")
-        run_builder(["jetbrains-mono", str(regular), str(italic), str(release / "fonts/variable"),
-                     str(stage), *WEIGHTS])
-        return Manifest(f"{self.VERSION} on {regular.name}", ["400", *WEIGHTS], [str(regular), str(italic)],
-                        fingerprints([regular, italic]))
+        (stage / "variable").mkdir()
+        for v in self.VARIABLE:
+            shutil.copy2(release / "fonts/variable" / v, stage / "variable" / v)
+        if (release / "OFL.txt").exists():
+            shutil.copy2(release / "OFL.txt", stage / "OFL.txt")
+        return Manifest(self.VERSION)
+
+    def weight_faces(self):
+        """Grafted onto the installed copy, read when settings are applied: a system
+        update changes its fingerprint, and fontlab rebuilds on the next apply."""
+        found = self.system_files() if self.has_weights() else None
+        if not found:
+            return []
+        var = self.root / "variable"
+        return [WeightFace(base, var / v, "graft") for base, v in zip(found, self.VARIABLE)]
+
+    def replaces(self, manifest):
+        return [str(f) for f in self.system_files() or ()]
 
 
 class GoogleSansFlex(Package):
@@ -288,21 +319,10 @@ PACKAGES: tuple[Package, ...] = (Inter(), JetBrainsMono(), GoogleSansFlex(), Win
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 
-
-def outdated_notices() -> list[str]:
-    """One notice per package whose system source changed since it was built."""
-    out = []
-    for p in PACKAGES:
-        if p.changed_inputs():
-            out.append(f"{p.name}: the system copy changed since fontlab built it, so the system "
-                       f"font is used for now. Rebuild with: fontlab fonts install {p.id}")
-    return out
-
-
 def unlocking(key: str) -> list[Package]:
     """Packages that give a setting something to act on (weights, darkening)."""
     return [p for p in PACKAGES if p.weight_key == key or (key == "darkening" and p.darkens)]
 
 
-__all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "Source", "ToolError", "WEIGHTS",
-           "outdated_notices", "unlocking"]
+__all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "Source", "ToolError", "WeightFace",
+           "unlocking"]

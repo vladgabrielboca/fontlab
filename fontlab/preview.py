@@ -62,7 +62,7 @@ def compare_setup(state: State) -> dict[str, str]:
     shutil.rmtree(font_dir, ignore_errors=True)
     font_dir.mkdir(parents=True)
 
-    sets = [fs for fs in fonts.plan(state) if fs.sources]
+    sets = [fs for fs in fonts.plan(state) if not fs.empty]
     for family, files in fonts.realize(sets).items():
         (font_dir / family).mkdir()
         for f in files:

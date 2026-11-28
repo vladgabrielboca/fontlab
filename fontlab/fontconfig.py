@@ -150,7 +150,7 @@ def web_conf(state: State, inter_available: bool) -> str | None:
 def confs(state: State, sets) -> tuple[str, str | None]:
     """(70-fontlab-render.conf, 71-fontlab-web.conf or None) for a state and its font plan
     (fonts.plan). Shared by apply and the preset comparison window."""
-    have = {fs.family.id for fs in sets if fs.sources}
+    have = {fs.family.id for fs in sets if not fs.empty}
     rejects = [g for fs in sets for g in fs.rejects]
     return (render_conf(state, rejects, google_sans="googlesans" in have),
             web_conf(state, inter_available="inter" in have))
