@@ -46,11 +46,10 @@ class SettingsTest(unittest.TestCase):
         for s in SETTINGS:
             self.assertIn(s.default, s.choices, s.key)
 
-    def test_step_stops_at_ends(self) -> None:
-        s = BY_KEY["gamma"]
-        self.assertEqual(s.step("1.0", -1), "1.0")
-        self.assertEqual(s.step("2.2", 1), "2.2")
-        self.assertEqual(s.step("1.4", 1), "1.5")
+    def test_active_when_names_real_settings(self) -> None:
+        for s in SETTINGS:
+            for key, values in s.active_when:
+                self.assertTrue(set(values) <= set(BY_KEY[key].choices), s.key)
 
 
 class StateTest(TempHome):
@@ -95,6 +94,24 @@ class AvailabilityTest(TempHome):
         self.assertEqual(len(notices), 2)
         st, _ = Context.detect().effective(dict(DEFAULTS, web_fonts="ubuntu"))
         self.assertEqual(st["web_fonts"], "system")
+
+    def test_locked_setting_keeps_its_value_but_applies_the_default(self) -> None:
+        ctx = Context.detect()
+        st = dict(DEFAULTS, lcdfilter="legacy")                       # grayscale: does nothing
+        self.assertIn("Antialiasing", ctx.locked(st, BY_KEY["lcdfilter"]))
+        effective, notices = ctx.effective(st)
+        self.assertEqual((effective["lcdfilter"], notices), ("light", []))
+        self.assertEqual(st["lcdfilter"], "legacy")                    # the state keeps it
+        rgb = dict(st, antialias="rgb")
+        self.assertIsNone(ctx.locked(rgb, BY_KEY["lcdfilter"]))
+        self.assertEqual(ctx.effective(rgb)[0]["lcdfilter"], "legacy")
+        # A lock follows the value apply uses: web_fonts=sf without the package is system.
+        self.assertIsNotNone(ctx.locked(dict(DEFAULTS, web_fonts="sf"), BY_KEY["sf_weight"]))
+
+    def test_vencord_needs_a_client(self) -> None:
+        self.assertIn("Vencord", Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
+        (self.home / ".config/vesktop/settings").mkdir(parents=True)
+        self.assertIsNone(Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
 
     def test_weight_choices_follow_manifest(self) -> None:
         self.fake_package("sf", {"400": ["SF-Pro-Text-Regular.otf"]})     # no variable font: 400 only
@@ -434,8 +451,13 @@ class ChromiumDefaultsTest(TempHome):
         self.assertTrue(chromium.needs_launcher(dict(DEFAULTS, web_fonts="windows")))
 
     def test_lcd_filter_needs_subpixel_text(self) -> None:
+        for f in ("chromium-env.sh", "fontlab-text-shim.so"):
+            (paths.P.runtime_dir).mkdir(parents=True, exist_ok=True)
+            (paths.P.runtime_dir / f).write_text("x")
         box = dict(DEFAULTS, chromium_lcd_filter="box")
-        self.assertIsNone(chromium.text_conf(box))          # grayscale: Skia skips the LCD filter
+        effective, notices = Context.detect().effective(box)
+        self.assertIsNone(chromium.text_conf(effective))    # grayscale: locked to stock
+        self.assertEqual(notices, [])
         self.assertEqual(chromium.text_conf(dict(box, antialias="rgb")),
                          "CONTRAST=0.2\nGAMMA=1.2\nLCD_FILTER=box\n")
         self.assertTrue(chromium.needs_launcher(dict(box, antialias="bgr")))

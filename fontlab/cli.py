@@ -46,9 +46,14 @@ def cmd_status(_args) -> None:
         if s.group != group:
             group = s.group
             print(f"\n{group}")
-        reason = ctx.blocker(s.key, st[s.key])
-        note = f"   (unavailable: {reason})" if reason else \
-            "" if st[s.key] == s.default else f"   (default {s.default})"
+        if reason := ctx.blocker(s.key, st[s.key]):
+            note = f"   (unavailable: {reason})"
+        elif (reason := ctx.locked(st, s)) and st[s.key] != s.default:
+            note = f"   (locked, using {s.default}: {reason})"
+        elif reason:
+            note = f"   (locked: {reason})"
+        else:
+            note = "" if st[s.key] == s.default else f"   (default {s.default})"
         print(f"  {s.key:<20} {st[s.key]}{note}")
 
 
@@ -57,7 +62,10 @@ def cmd_list(_args) -> None:
     for s in SETTINGS:
         usable = ctx.choices(s)
         shown = " ".join(c if c in usable else f"({c})" for c in s.choices)
-        print(f"{s.key:<20} {shown}\n{'':<20} {s.help}")
+        print(f"{s.key:<20} {shown}\n{'':<20} {s.help}\n{'':<20} Affects: {s.affects}.")
+        if s.active_when:
+            when = "; ".join(f"{k} = {' or '.join(v)}" for k, v in s.active_when)
+            print(f"{'':<20} Only does something when {when}.")
     print("\n(choice) = needs a font package or the Chromium shim, see: fontlab fonts")
 
 
@@ -81,6 +89,9 @@ def cmd_set(args) -> None:
             raise StateError(f"{key}={value}: {reason}. See: fontlab fonts")
         st[key] = value
     statefile.save(st)
+    for key in dict.fromkeys(pair.partition("=")[0] for pair in args.pairs):
+        if (reason := ctx.locked(st, BY_KEY[key])) and st[key] != BY_KEY[key].default:
+            print(f"{key} saved but locked ({reason}): using {BY_KEY[key].default} until then")
     print_report(apply(st, system=args.system))
 
 

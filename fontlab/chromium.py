@@ -39,8 +39,9 @@ WRAPPER_MARK = apps.WRAPPER_MARK
 
 
 def lcd_box(state: State) -> bool:
-    """Whether the shim swaps Skia's LCD filter: only subpixel text uses it."""
-    return state.get("chromium_lcd_filter") == "box" and state["antialias"] in ("rgb", "bgr")
+    """Whether the shim swaps Skia's LCD filter. With grayscale text the setting is
+    locked to stock before it gets here (Setting.active_when)."""
+    return state["chromium_lcd_filter"] == "box"
 
 
 def text_conf(state: State) -> str | None:

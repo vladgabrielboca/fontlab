@@ -1,44 +1,62 @@
-"""What can be used on this machine right now.
+"""What can be used on this machine right now, and which settings do something.
 
-A setting or a choice can depend on a font package (installed with `fontlab fonts`) or
-on the Chromium shim (installed by install.sh). Unavailable things are shown greyed
-out, refused by `fontlab set`, and replaced by their default when a state or preset
-from another machine is applied.
+A setting or a choice can depend on a font package (installed with `fontlab fonts`), on
+the Chromium shim (installed by install.sh) or on a Vencord client. Unavailable things
+are shown greyed out, refused by `fontlab set`, and replaced by their default when a
+state or preset from another machine is applied.
+
+A setting can also depend on another setting (Setting.active_when): the LCD filters do
+nothing with grayscale antialiasing. Such a setting is locked: state.toml keeps its
+value, apply uses the default, and the value is back once the other setting allows it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import paths
+from . import paths, vencord
 from .packages import BY_ID, Manifest, unlocking
-from .settings import BY_KEY, WEB_FONTS, Setting
+from .settings import BY_KEY, SETTINGS, WEB_FONTS, Setting
 from .state import State
+
+NAMES = {"shim": "the Chromium shim (run install.sh)",
+         "vencord": "a Vencord client (Vesktop, Vencord or Equibop)"}
 
 
 def needs(s: Setting) -> tuple[str, ...]:
-    """What a setting needs, any one of: font package ids or "shim"."""
+    """What a setting needs, any one of: font package ids, "shim" or "vencord"."""
     return s.needs or tuple(p.id for p in unlocking(s.key))
+
+
+def lock_reason(s: Setting, state: State) -> str | None:
+    """Why a setting does nothing with these other values (Setting.active_when), or None."""
+    for key, values in s.active_when:
+        if state[key] not in values:
+            return f"only when {BY_KEY[key].label} is {' or '.join(values)}"
+    return None
 
 
 @dataclass(frozen=True)
 class Context:
     manifests: dict[str, Manifest]
     shim: bool
+    vencord: bool = False
 
     @classmethod
     def detect(cls) -> Context:
         manifests = {p.id: m for p in BY_ID.values() if (m := p.manifest())}
         runtime = paths.P.runtime_dir
         shim = (runtime / "chromium-env.sh").exists() and (runtime / "fontlab-text-shim.so").exists()
-        return cls(manifests, shim)
+        return cls(manifests, shim, bool(vencord.css_files()))
 
     def has(self, need: str) -> bool:
-        return self.shim if need == "shim" else need in self.manifests
+        if need in ("shim", "vencord"):
+            return getattr(self, need)
+        return need in self.manifests
 
     @staticmethod
     def _name(need: str) -> str:
-        return "the Chromium shim (run install.sh)" if need == "shim" else BY_ID[need].name
+        return NAMES.get(need) or BY_ID[need].name
 
     def setting_blocker(self, s: Setting) -> str | None:
         wanted = needs(s)
@@ -64,10 +82,19 @@ class Context:
         return [c for c in s.choices if not self.choice_blocker(s, c)]
 
     def effective(self, state: State) -> tuple[State, list[str]]:
-        """The state with every unavailable value replaced by its default."""
+        """The state apply uses: unavailable values replaced by their default (with a
+        notice), then locked settings by theirs (silently: that is what locked means)."""
         out, notices = dict(state), []
         for key, value in state.items():
             if value != BY_KEY[key].default and (reason := self.blocker(key, value)):
                 out[key] = BY_KEY[key].default
                 notices.append(f"{key}={value} skipped ({reason}), using {BY_KEY[key].default}")
+        available = dict(out)
+        for s in SETTINGS:
+            if lock_reason(s, available):
+                out[s.key] = s.default
         return out, notices
+
+    def locked(self, state: State, s: Setting) -> str | None:
+        """Why the TUI and CLI should not offer this setting right now, or None."""
+        return self.setting_blocker(s) or lock_reason(s, self.effective(state)[0])
