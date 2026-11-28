@@ -2,8 +2,9 @@
 
 fontlab used to reach Chromium apps three ways: /usr/local/bin wrappers (install.sh),
 desktop entries rewritten to start through fontlab-launch, and the session LD_PRELOAD.
-Only the session LD_PRELOAD is left. This module puts the desktop entries back and deletes
-the app lists; install.sh deletes the wrappers (they need sudo). Drop this file once no
+Only the session LD_PRELOAD is left. This module puts the desktop entries back, deletes
+the app lists and the session LD_PRELOAD's location before 2026-11-25
+(~/.config/environment.d/90-fontlab.conf); install.sh deletes the wrappers (they need sudo). Drop this file once no
 machine has the old setup.
 """
 
@@ -65,7 +66,7 @@ def cleanup() -> bool:
     shutil.rmtree(p.desktop_backup, ignore_errors=True)
     remove(p.config_dir / "apps.json")
     remove(p.cache_dir / "apps.json")
-    return changed
+    return changed | remove(p.home / ".config/environment.d/90-fontlab.conf")
 
 
 def wrappers() -> list[Path]:

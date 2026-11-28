@@ -419,12 +419,9 @@ class ChromiumTest(TempHome):
         self.assertIsNone(chromium.session_env_text(False))
         self.assertFalse(chromium.apply_session_env(False))
         self.assertFalse(conf.exists())
-        paths.P.old_session_env_conf.parent.mkdir(parents=True)
-        paths.P.old_session_env_conf.write_text("LD_PRELOAD=x\n")
         conf.parent.mkdir(parents=True)
         conf.write_text("export FOO=1\n")
         self.assertTrue(chromium.apply_session_env(True))
-        self.assertFalse(paths.P.old_session_env_conf.exists())
         text = conf.read_text()
         self.assertTrue(text.startswith("export FOO=1\n"))
         self.assertIn("fontlab-text-shim.so", text)
@@ -587,6 +584,12 @@ class LegacyCleanupTest(TempHome):
         self.assertFalse(p.desktop_backup.exists())
         self.assertFalse((p.config_dir / "apps.json").exists())
         self.assertFalse(legacy.cleanup())
+
+    def test_old_session_env_file_is_removed(self) -> None:
+        old = self.home / ".config/environment.d/90-fontlab.conf"   # location before 2026-11-25
+        self.fake_font(old, "LD_PRELOAD=x\n")
+        self.assertTrue(legacy.cleanup())
+        self.assertFalse(old.exists())
 
 
 class VencordTest(TempHome):

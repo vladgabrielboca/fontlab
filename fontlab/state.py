@@ -41,7 +41,7 @@ def normalize(key: str, value: str) -> str:
     choices = BY_KEY[key].choices if key in BY_KEY else ()
     if value in choices:
         return value
-    if key == "web_fonts" and (value == "default" or value in REMOVED_WEB_FONTS):  # "default": before 2026-11-23
+    if key == "web_fonts" and value in REMOVED_WEB_FONTS:
         return "system"
     try:
         number = float(value)

@@ -283,7 +283,6 @@ def apply_session_env(on: bool) -> bool:
         changed = write_if_changed(p, new)
     else:
         changed = remove(p)
-    changed |= remove(paths.P.old_session_env_conf)    # location used before 2026-11-25
     changed |= sync_systemd_session_env(block is not None)
     return changed
 

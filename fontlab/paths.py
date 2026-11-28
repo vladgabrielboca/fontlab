@@ -79,12 +79,6 @@ class Paths:
         return self.home / ".config/uwsm/env"
 
     @property
-    def old_session_env_conf(self) -> Path:
-        """Earlier location of the session LD_PRELOAD (environment.d); removed on apply.
-        systemd reads it only when the user manager starts, which a logout does not do."""
-        return self.home / ".config/environment.d/90-fontlab.conf"
-
-    @property
     def runtime_dir(self) -> Path:
         """The Chromium text shim, fontlab-text-shim.so, installed by install.sh."""
         return self.home / ".local/share/fontlab/runtime"
