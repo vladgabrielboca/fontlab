@@ -8,7 +8,7 @@ UI) and preloads the shim, which adds them to renderer launches (web pages); Chr
 does not forward these switches to renderers by itself.
 
 Private fontconfig (chromium_fonts_conf), exported as FONTCONFIG_FILE by chromium-env.sh
-whenever web_fonts is not "system":
+whenever web_fonts is not "system" or chromium_hinting differs from the desktop's hinting:
 - CSS system-ui: Chromium takes it from the GTK UI font (gsettings font-name, e.g.
   "Adwaita Sans 11") and never asks fontconfig for "system-ui", so the web font rules miss
   it. The private file maps that family to the web font, for Chromium apps only; GTK apps
@@ -27,7 +27,7 @@ import subprocess
 from html import escape
 from pathlib import Path
 
-from . import apps, desktop, paths
+from . import apps, desktop, fontconfig, paths
 from .fsutil import remove, write_if_changed
 from .settings import BY_KEY
 from .state import State
@@ -89,16 +89,21 @@ def hint_rule(state: State) -> str:
     Chromium and FreeType want opposite values: subpixel positioning at `slight` keeps
     ClearType-like spacing, while `full` runs bytecode hints that land glyphs off the
     pixels Windows puts them on. The rule comes after 70-fontlab-render.conf, so it wins
-    for Chromium only. Empty when both settings agree."""
+    for Chromium only, monospace included. Empty when hinting and mono_hinting both
+    equal chromium_hinting. With darkening on, the icon font rules are repeated after it,
+    so icon fonts stay unhinted."""
     style = state["chromium_hinting"]
-    if style == state["hinting"]:
+    if style == state["hinting"] == state["mono_hinting"]:
         return ""
     enabled = "false" if style == "none" else "true"
-    return ("  <!-- Chromium: grid fitting kept apart from the rest of the desktop. -->\n"
-            '  <match target="font">\n'
-            f'    <edit name="hinting" mode="assign"><bool>{enabled}</bool></edit>\n'
-            f'    <edit name="hintstyle" mode="assign"><const>hint{style}</const></edit>\n'
-            "  </match>\n")
+    out = ("  <!-- Chromium: grid fitting kept apart from the rest of the desktop. -->\n"
+           '  <match target="font">\n'
+           f'    <edit name="hinting" mode="assign"><bool>{enabled}</bool></edit>\n'
+           f'    <edit name="hintstyle" mode="assign"><const>hint{style}</const></edit>\n'
+           "  </match>\n")
+    if fontconfig.darkening_on(state):
+        out += fontconfig.icon_rules()
+    return out
 
 
 def fonts_conf(state: State) -> str | None:

@@ -81,7 +81,7 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("chromium_hinting", "Chromium", "Hinting, Chromium", HINT_STYLES, "slight",
             "Grid fitting in Chromium and Electron apps, all text including code blocks. Kept apart from "
             "hinting because Chromium and FreeType want opposite values: slight keeps subpixel spacing, "
-            "full makes Chromium's glyphs land wrong. Ignored when it equals hinting."),
+            "full makes Chromium's glyphs land wrong. Writes nothing when hinting and mono_hinting equal it."),
     Setting("session_shim", "Chromium", "Session-wide shim", ("off", "on"), "off",
             "Add the shim to LD_PRELOAD in ~/.config/uwsm/env and systemd --user so Chromium, Electron "
             "and AppImages launched from keybinds or terminals get contrast, gamma and system-ui. "

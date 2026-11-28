@@ -72,7 +72,7 @@ a new terminal window for terminal fonts.
 |---|---|
 | antialias | `grayscale`, or `rgb`/`bgr` for subpixel text |
 | hinting | how hard letters snap to the pixel grid, for GTK, Qt, terminals, Firefox and the rest of the desktop: none, slight, medium, full. `full` is what Windows does and is crisper with any font that carries hints, but Chromium wants the opposite, so it has its own setting |
-| chromium_hinting | the same for Chromium and Electron apps, code blocks included. Default `slight`: Chromium keeps subpixel spacing, while `full` runs the font's own hints and lands glyphs where Windows does not. Ignored when it equals `hinting` |
+| chromium_hinting | the same for Chromium and Electron apps, code blocks included. Default `slight`: Chromium keeps subpixel spacing, while `full` runs the font's own hints and lands glyphs where Windows does not. Writes nothing when `hinting` and `mono_hinting` equal it |
 | mono_hinting | the same, for monospace fonts in your terminal and editor |
 | lcdfilter | colour filter for subpixel text. Chromium ignores it |
 | small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. GTK apps use it; Chromium and Qt ignore it |

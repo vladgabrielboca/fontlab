@@ -299,6 +299,14 @@ class ChromiumTest(TempHome):
         self.assertIn("<const>hintslight</const>", native)             # the mono rule, unchanged
         none = chromium.hint_rule(dict(DEFAULTS, hinting="full", chromium_hinting="none"))
         self.assertIn('<bool>false</bool>', none)
+        # Monospace in Chromium follows chromium_hinting whatever hinting is.
+        mono = dict(DEFAULTS, mono_hinting="full")
+        self.assertIn("<const>hintslight</const>", chromium.hint_rule(mono))
+        self.assertIn("<const>hintslight</const>", chromium.hint_rule(dict(mono, hinting="full")))
+        # Icon fonts stay unhinted when darkening is on: their rules come after the override.
+        dark = chromium.hint_rule(dict(full, freetype_darkening="all"))
+        self.assertLess(dark.index("hintslight"), dark.index("Font Awesome"))
+        self.assertNotIn("Font Awesome", chromium.hint_rule(full))
 
     def test_session_shim_env_drop_in(self) -> None:
         conf = paths.P.session_env_conf
