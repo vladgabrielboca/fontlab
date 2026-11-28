@@ -16,25 +16,25 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
    - Register the builder command in `builders/run.py` (`nfixed` and `builder` maps).
 
 2. **Package (`fontlab/packages.py`)**:
-   - Subclass `Package` with `id`, `name`, `summary`, `optional`, and `license_note` / `needs_folder` if needed.
+   - Subclass `Package` with `id`, `name`, `summary`, `optional`, and `license_note` if needed.
+   - Set how `fonts.py` installs it: `weight_key` (the setting that picks its weight), `darkens=True` only for TrueType (`glyf`) outlines (`darken.py` skips variable fonts and `CFF`), `system_base=True` when the system font is the 400 base, `installs=False` when it is not a desktop font (Windows fonts).
+   - Override `install_sources()` when it is not a plain download (built from the installed copy, imported from a folder with `ask=True`, detected folders). The TUI and CLI only render that list.
+   - These attributes are the only place package-to-setting links live: `availability.needs()`, `unlocking()`, `unlocks()` (Fonts tab) and `fonts.families()` derive from them.
    - Pin downloads with SHA-256 hashes via `download.fetch(..., sha256)`.
    - Populate `Manifest(version, weights, replaces)`. `replaces` lists system font paths from `find_fonts()` (which excludes `paths.P.installed_fonts`) so `70-fontlab-render.conf` hides them with `<rejectfont>`.
    - Append to `PACKAGES` (which builds `BY_ID`). `Package.install()` marks staged files `0o444` and swaps atomically via `replace_dir()`.
 
-3. **Family and darkening (`fontlab/fonts.py`)**:
-   - Add a `Family(package, weight_key, darkens=..., system_base=...)` entry to `FAMILIES`.
-   - Set `darkens=True` only for TrueType (`glyf`) outlines. `darken.py` skips variable fonts (`fvar`) and only transforms `glyf` contours, not `CFF`.
-
-4. **Fontconfig and Chromium (`fontlab/fontconfig.py` and `fontlab/chromium.py`)**:
+3. **Fontconfig and Chromium (`fontlab/fontconfig.py` and `fontlab/chromium.py`)**:
    - Use `mode="prepend" binding="strong"` for all family aliases (Chromium ignores weak matches).
    - Put global aliases in `70-fontlab-render.conf` (applies under `web_fonts=system` and Chromium's `windows` private conf, like `googlesans`), and web-font-only aliases in `71-fontlab-web.conf`.
-   - If the package affects `web_fonts` or `system-ui`, update `chromium.SYSTEM_UI`, `chromium.fonts_conf()`, and `preview.compare_setup()`.
+   - A new `web_fonts` choice is one `WebFont(family, system_ui, package)` entry in `settings.WEB_FONTS`; `fontconfig.web_conf()`, `chromium.system_ui_rule()` and availability read it. Apply and the comparison window both get their fontconfig text from `fontconfig.confs()`.
 
-5. **Availability and settings (`fontlab/availability.py` and `fontlab/settings.py`)**:
-   - Update `WEIGHT_PACKAGES`, `CHOICE_PACKAGES`, and `Setting.needs` so missing packages grey out choices in the TUI, fail in `fontlab set`, and fall back to defaults in `Context.effective()`.
-   - New settings in `settings.py` need a fixed tuple of string choices, a default inside `choices`, and any numeric normalization handled in `state.normalize()`.
+4. **Settings (`fontlab/settings.py`)**:
+   - A new setting needs a fixed tuple of string choices, a default inside `choices`, `help` (what the choices do) and `affects` (which apps, and what it takes to see a change). Numeric normalization goes in `state.normalize()`.
+   - `needs=("shim",)` or `("vencord",)` for non-package needs.
+   - `active_when=((key, values),)` when it does nothing unless another setting has one of `values`. Locked settings keep their value in `state.toml`; `Context.effective()` applies the default, so generators never need to check the other setting themselves.
 
-6. **Tests and docs (`tests/test_fontlab.py`, `README.md`)**:
+5. **Tests and docs (`tests/test_fontlab.py`, `README.md`)**:
    - Add unit tests for install/remove atomicity, `fonts.plan()`/`install()` caching, generated fontconfig XML (`render_conf` / `web_conf`), `Context.effective()` fallback when uninstalled, and `preview.compare_setup()`.
    - Update the tables and credits in `README.md` (plus `docs/internals/architecture.md` if paths or `apply()` stages changed).
 

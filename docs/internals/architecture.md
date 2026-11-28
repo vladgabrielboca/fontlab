@@ -8,18 +8,19 @@
 ~/.config/fontlab/state.toml
         │
         ▼
-  state.load() ──▶ Context.detect().effective(state)   (falls back to defaults for unavailable choices)
+  state.load() ──▶ Context.detect().effective(state)   (defaults for unavailable choices and locked settings)
         │
         ├──▶ 1. fonts.install(state)          ──▶ ~/.local/share/fonts/fontlab/<family>/
         │                                         (caches darkened TTFs in ~/.cache/fontlab/builds/)
-        ├──▶ 2. fontconfig.render_conf()      ──▶ ~/.config/fontconfig/conf.d/70-fontlab-render.conf
-        │       fontconfig.web_conf()         ──▶ ~/.config/fontconfig/conf.d/71-fontlab-web.conf
+        ├──▶ 2. fontconfig.confs(state, sets) ──▶ ~/.config/fontconfig/conf.d/70-fontlab-render.conf
+        │                                     ──▶ ~/.config/fontconfig/conf.d/71-fontlab-web.conf
         │       fc-cache (if fonts or conf changed; notices Omarchy shell restart if fonts changed)
         │
-        ├──▶ 3. chromium.apply(state)         ──▶ ~/.config/fontlab/chromium-text.conf
+        ├──▶ 3. chromium.apply(state, shim)   ──▶ ~/.config/fontlab/chromium-text.conf
         │                                     ──▶ ~/.config/fontlab/chromium-fonts.conf
         │                                     ──▶ ~/.config/uwsm/env (+ systemd --user LD_PRELOAD)
         │       apps.apply(needs_launcher)    ──▶ ~/.local/share/applications/*.desktop (wrapped)
+        │       (without the shim: chromium.remove_all() undoes all of step 3)
         │
         ├──▶ 4. vencord.apply(state)          ──▶ ~/.config/{vesktop,Vencord,equibop}/settings/quickCss.css
         │
@@ -27,6 +28,12 @@
         │
         └──▶ 6. desktop.apply_environment()   ──▶ /etc/environment (only with --system / ! and != "keep")
 ```
+
+## Settings, availability and locks
+
+- `settings.py` holds every setting (`Setting`: choices, default, `help`, `affects`, `needs`, `active_when`) and the `WEB_FONTS` table.
+- `packages.py` says which setting each package feeds (`weight_key`, `darkens`). `availability.needs()` and `packages.unlocking()` derive setting needs from that, so there is no second list.
+- `Context.effective(state)` swaps unavailable values for defaults (with a notice) and then locked ones (`active_when` not met, silently). `Context.locks(state)` gives the reason per setting for the TUI and CLI. `state.toml` keeps the user's value either way.
 
 ## Paths (`fontlab/paths.py`)
 
@@ -41,8 +48,8 @@ Every path `fontlab` reads or writes lives on `paths.P` (`Paths(home)`). Unit te
 | Installed fonts | `~/.local/share/fonts/fontlab/<pkg>/` | Active family folders with `.fontlab-key` marker; swapped atomically via `replace_dir()`. |
 | Fontconfig | `~/.config/fontconfig/conf.d/70-fontlab-render.conf` | AA, hinting, mono hinting, LCD filter, `small_bold`, Google Sans aliases, icon-font darkening exclusions, `<rejectfont>` globs. |
 | Fontconfig | `~/.config/fontconfig/conf.d/71-fontlab-web.conf` | `sans-serif`/`system-ui`/Arial aliases (`inter` or `sf`; absent for `system`). |
-| Chromium | `~/.config/fontlab/chromium-text.conf` | `CONTRAST=..` and `GAMMA=..`; removed when both match Chromium's Linux defaults (`0.2` / `1.2`). |
-| Chromium | `~/.config/fontlab/chromium-fonts.conf` | Private `FONTCONFIG_FILE` for Chromium apps when `web_fonts != "system"`. Maps the GTK UI font to the chosen web font so CSS `system-ui` follows `web_fonts`, and adds the Windows font dir plus `data/web-windows.conf` when `web_fonts=windows`. |
+| Chromium | `~/.config/fontlab/chromium-text.conf` | `CONTRAST=..`, `GAMMA=..` and `LCD_FILTER=box`; removed when contrast and gamma match Chromium's Linux defaults (`0.2` / `1.2`) and the filter is stock. |
+| Chromium | `~/.config/fontlab/chromium-fonts.conf` | Private `FONTCONFIG_FILE` for Chromium apps when `web_fonts != "system"` or `chromium_hinting` differs from `hinting`/`mono_hinting`. Maps the GTK UI font to the chosen web font so CSS `system-ui` follows `web_fonts`, and adds the Windows font dir plus `data/web-windows.conf` when `web_fonts=windows`. |
 | Runtime | `~/.local/share/fontlab/runtime/` | Installed by `install.sh`: `fontlab-text-shim.so`, `chromium-env.sh`, `fontlab-launch`. |
 | Session env | `~/.config/uwsm/env` | Single marked block for `session_shim=on`, also synced to `systemctl --user`. |
 | Desktop entries | `~/.local/share/applications/*.desktop` | Marked with `X-Fontlab-Wrapped=true`; user-owned originals backed up in `~/.local/share/fontlab/desktop-backup/`. |
@@ -64,7 +71,7 @@ Every path `fontlab` reads or writes lives on `paths.P` (`Paths(home)`). Unit te
      - `Ubuntu Sans` and `Ubuntu Sans Mono 400–500` are instanced from Canonical's variable fonts (`static-family` builder) and carry only `prep`/`gasp`, no glyph bytecode, like the variable fonts Ubuntu itself installs.
      - `SF Pro 400` is OpenType CFF (`.otf`); instanced `SF Pro 430–500` are TrueType (`.ttf`) without TT bytecode.
      - `JetBrains Mono 430–500` graft variable glyph outlines onto the user's installed copy (keeping Nerd Font icons) and strip bytecode (`fpgm`/`prep`/`cvt ` plus per-glyph programs).
-2. `fonts.py` plans a `FontSet` per family in `FAMILIES`. When `darkening > 0` on a TrueType UI family (`inter`, `adwaita`, `roboto`, `ubuntu`; `googlesans` stays stock to match Google's web font), `realize()` runs `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`) into `~/.cache/fontlab/builds/<family>-<key>/`.
+2. `fonts.py` plans a `FontSet` per package in `fonts.families()` (packages with `installs=True`). When `darkening > 0` on a TrueType UI family (`inter`, `adwaita`, `roboto`, `ubuntu`; `googlesans` stays stock to match Google's web font), `realize()` runs `builders/darken.py` (`FT_Outline_EmboldenXY` with `DARKEN_X_EM = 0.0121 * darkening`, `DARKEN_Y_EM = 0.0121 * 1.25 * darkening`) into `~/.cache/fontlab/builds/<family>-<key>/`.
 3. `fonts.install()` hard-links files into a staging directory, replaces `~/.local/share/fonts/fontlab/<family>` atomically, and calls `newer_than()` to push mtime past the current whole second so `fc-cache` does not skip back-to-back applies.
 
 ## Chromium text shim (`chromium/`)

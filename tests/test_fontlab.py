@@ -52,6 +52,27 @@ class SettingsTest(unittest.TestCase):
                 self.assertTrue(set(values) <= set(BY_KEY[key].choices), s.key)
 
 
+class SharedTablesTest(unittest.TestCase):
+    def test_package_links(self) -> None:
+        from fontlab.availability import needs, unlocks
+        from fontlab.packages import unlocking
+        self.assertEqual([p.id for p in unlocking("ui_weight")], ["inter", "adwaita", "roboto", "ubuntu"])
+        self.assertEqual(needs(BY_KEY["darkening"]), ("inter", "adwaita", "roboto", "ubuntu"))
+        self.assertEqual(needs(BY_KEY["mono_weight"]), ("jbm", "ubuntumono"))
+        self.assertEqual(needs(BY_KEY["gamma"]), ("shim",))
+        self.assertEqual(unlocks(BY_ID["sf"]), ["SF Pro Text weight", "web font sf"])
+        self.assertEqual([p.id for p in fonts.families()][-1], "sf")      # windows is Chromium only
+
+    def test_replace_block(self) -> None:
+        import re
+        from fontlab.fsutil import replace_block
+        pat = re.compile(r"\n?# s\n.*?# e\n?", re.S)
+        self.assertEqual(replace_block("", pat, "# s\nX\n# e\n"), "# s\nX\n# e\n")
+        self.assertEqual(replace_block("a\n# s\nX\n# e\nb\n", pat, "# s\nY\n# e\n"), "a\nb\n\n# s\nY\n# e\n")
+        self.assertEqual(replace_block("a\n# s\nX\n# e\n", pat, None), "a\n")
+        self.assertEqual(replace_block("# s\nX\n# e\n", pat, None), "")
+
+
 class StateTest(TempHome):
     def test_round_trip(self) -> None:
         st = dict(DEFAULTS, gamma="1.8", hinting="none")

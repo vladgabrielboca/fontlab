@@ -34,15 +34,20 @@ Run `./install.sh` again after you `git pull`.
 
 ## Use
 
-On the screen:
+The screen has two tabs: Settings and Fonts. The bottom panel explains the selected
+row and which apps it affects. A setting that can't do anything right now is locked
+(for example the LCD filter with grayscale antialiasing): it keeps your value, fontlab
+uses the default meanwhile, and your value comes back when the setting unlocks.
 
 | key | does |
 |---|---|
+| Tab | switch between Settings and Fonts |
 | ↑ ↓ | move |
 | ← → | change the value |
-| Enter | show all choices, or install a font |
+| Enter | show all choices, or install, update or remove a font |
 | r | reset to the default |
 | x | remove a font |
+| b | restart the Omarchy shell after font files changed |
 | p | open a Chromium preview window that reloads on every change |
 | c | open a second window with a saved preset next to it, to compare (c again closes it) |
 | s / o | save or open a preset |
