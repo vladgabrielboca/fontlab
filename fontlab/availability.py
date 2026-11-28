@@ -11,14 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import paths
-from .packages import BY_ID, Manifest
-from .settings import BY_KEY, Setting
+from .packages import BY_ID, Manifest, unlocking
+from .settings import BY_KEY, WEB_FONTS, Setting
 from .state import State
 
-WEIGHT_PACKAGES = {"ui_weight": ("inter", "adwaita", "roboto", "ubuntu"),
-                   "mono_weight": ("jbm", "ubuntumono"), "sf_weight": ("sf",)}
-CHOICE_PACKAGES = {("web_fonts", "inter"): "inter", ("web_fonts", "sf"): "sf",
-                   ("web_fonts", "ubuntu"): "ubuntu", ("web_fonts", "windows"): "windows"}
+
+def needs(s: Setting) -> tuple[str, ...]:
+    """What a setting needs, any one of: font package ids or "shim"."""
+    return s.needs or tuple(p.id for p in unlocking(s.key))
 
 
 @dataclass(frozen=True)
@@ -41,19 +41,19 @@ class Context:
         return "the Chromium shim (run install.sh)" if need == "shim" else BY_ID[need].name
 
     def setting_blocker(self, s: Setting) -> str | None:
-        if not s.needs or any(self.has(n) for n in s.needs):
+        wanted = needs(s)
+        if not wanted or any(self.has(n) for n in wanted):
             return None
-        return "needs " + " or ".join(self._name(n) for n in s.needs)
+        return "needs " + " or ".join(self._name(n) for n in wanted)
 
     def choice_blocker(self, s: Setting, choice: str) -> str | None:
         if choice == s.default:
             return None
-        if (s.key, choice) in CHOICE_PACKAGES:
-            need = CHOICE_PACKAGES[(s.key, choice)]
+        if s.key == "web_fonts" and (need := WEB_FONTS[choice].package):
             return None if self.has(need) else f"needs {self._name(need)}"
-        if s.key in WEIGHT_PACKAGES:
-            pkgs = [self.manifests[p] for p in WEIGHT_PACKAGES[s.key] if p in self.manifests]
-            return None if any(choice in m.weights for m in pkgs) else f"weight {choice} was not built"
+        if s.key != "darkening" and (pkgs := unlocking(s.key)):
+            built = [self.manifests[p.id] for p in pkgs if p.id in self.manifests]
+            return None if any(choice in m.weights for m in built) else f"weight {choice} was not built"
         return self.setting_blocker(s)
 
     def blocker(self, key: str, value: str) -> str | None:

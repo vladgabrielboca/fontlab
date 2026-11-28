@@ -1,8 +1,9 @@
 """Every file and directory fontlab reads or writes, in one place.
 
-fontlab owns everything listed under "outputs". Nothing else should write there,
-and fontlab writes nowhere else, except for /etc/environment, where it edits only
-the FREETYPE_PROPERTIES line, and the gsettings font keys.
+fontlab owns everything listed under "outputs" (in ~/.config/uwsm/env and Vencord's
+quickCss.css, only its own marked block). Outside these it changes only the gsettings
+font keys, and with sudo the FREETYPE_PROPERTIES and QT_NO_SYNTHESIZED_BOLD lines in
+/etc/environment. install.sh adds the /usr/local/bin wrappers.
 """
 
 from __future__ import annotations
@@ -68,8 +69,8 @@ class Paths:
 
     @property
     def chromium_fonts_conf(self) -> Path:
-        """Private fontconfig for Chromium-family apps, when web_fonts is not "system"
-        (see chromium.py). chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
+        """Private fontconfig for Chromium-family apps (see chromium.fonts_conf).
+        chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
         return self.config_dir / "chromium-fonts.conf"
 
     @property

@@ -111,7 +111,7 @@ def cmd_fonts(args) -> None:
         for p in PACKAGES:
             m = p.manifest()
             mark = "✓" if m else " "
-            detail = m.version if m else (p.blocker() if not p.needs_folder else None) or "not installed"
+            detail = m.version if m else p.unavailable() or "not installed"
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
             print(f"   {'':<10} {p.summary}")
@@ -129,7 +129,13 @@ def cmd_fonts(args) -> None:
         return
     if pkg.license_note and not args.accept_license:
         raise StateError(f"{pkg.license_note}\nRun again with --accept-license to install.")
-    folder = Path(args.from_dir).expanduser() if args.from_dir else None
+    if args.from_dir:
+        folder = Path(args.from_dir).expanduser()
+    else:
+        ready = [s for s in pkg.install_sources() if not s.ask]
+        if not ready:
+            raise StateError(f"{pkg.name}: give the folder with --from DIR")
+        folder = ready[0].folder
     manifest = pkg.install(lambda msg: print(f"  {msg}", end="\r" if "%" in msg else "\n", flush=True),
                            folder)
     print(f"\ninstalled {pkg.name} ({manifest.version})")

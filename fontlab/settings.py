@@ -13,7 +13,24 @@ def steps(start: float, stop: float, step: float, digits: int) -> tuple[str, ...
 
 
 HINT_STYLES = ("none", "slight", "medium", "full")
-WEIGHTS = ("400", "430", "450", "475", "500")
+WEIGHTS = ("400", "430", "450", "475", "500")     # packages build every weight above 400
+
+
+@dataclass(frozen=True)
+class WebFont:
+    """One web_fonts choice."""
+    family: str | None      # what sans-serif, Arial etc. become in fontconfig (None: no rule)
+    system_ui: str | None   # what CSS system-ui becomes in Chromium (None: the GTK UI font)
+    package: str | None     # font package it needs
+
+
+WEB_FONTS: dict[str, WebFont] = {
+    "system": WebFont(None, None, None),
+    "inter": WebFont("Inter", "Inter", "inter"),
+    "ubuntu": WebFont("Ubuntu Sans", "Ubuntu Sans", "ubuntu"),
+    "sf": WebFont("SF Pro Text", "SF Pro Text", "sf"),
+    "windows": WebFont(None, "Segoe UI", "windows"),   # Chromium only; other apps keep Inter
+}
 
 
 @dataclass(frozen=True)
@@ -24,7 +41,8 @@ class Setting:
     choices: tuple[str, ...]
     default: str
     help: str
-    needs: tuple[str, ...] = ()     # usable when any of these is available (packages, "shim")
+    needs: tuple[str, ...] = ()     # "shim": usable only with the Chromium shim. Font package
+                                    # needs come from packages.py (weight_key, darkens).
 
     def step(self, value: str, delta: int) -> str:
         """The value delta places away, stopping at the ends of the list."""
@@ -50,18 +68,15 @@ SETTINGS: tuple[Setting, ...] = (
     # Fonts: files built and installed into ~/.local/share/fonts/fontlab.
     Setting("darkening", "Fonts", "Darkening", steps(0, 1, 0.05, 2), "0.00",
             "macOS-style stem darkening baked into Inter, Adwaita Sans, Roboto and Ubuntu Sans. "
-            "1 = macOS strength.",
-            needs=("inter", "adwaita", "roboto", "ubuntu")),
+            "1 = macOS strength."),
     Setting("ui_weight", "Fonts", "UI font weight", WEIGHTS, "400",
-            "Weight of Inter, Adwaita Sans, Roboto and Ubuntu Sans Regular/Italic. 400 = stock.",
-            needs=("inter", "adwaita", "roboto", "ubuntu")),
+            "Weight of Inter, Adwaita Sans, Roboto and Ubuntu Sans Regular/Italic. 400 = stock."),
     Setting("mono_weight", "Fonts", "Monospace weight", WEIGHTS, "400",
             "Weight of JetBrains Mono and Ubuntu Sans Mono Regular/Italic. Open a new terminal window "
-            "to see it.",
-            needs=("jbm", "ubuntumono")),
+            "to see it."),
     Setting("sf_weight", "Fonts", "SF Pro Text weight", WEIGHTS, "400",
-            "Weight of SF Pro Text Regular/Italic, used when web fonts = sf.", needs=("sf",)),
-    Setting("web_fonts", "Fonts", "Web and UI sans font", ("system", "inter", "ubuntu", "sf", "windows"),
+            "Weight of SF Pro Text Regular/Italic, used when web fonts = sf."),
+    Setting("web_fonts", "Fonts", "Web and UI sans font", tuple(WEB_FONTS),
             "system",
             "What sans-serif, system-ui, Arial etc. become. system: your distro's choice. "
             "ubuntu: Ubuntu Sans, as on Ubuntu 24.04. "

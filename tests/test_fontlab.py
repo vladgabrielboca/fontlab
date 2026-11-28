@@ -118,8 +118,7 @@ class FontsTest(TempHome):
         return paths.P.installed_fonts / rel
 
     def test_weight_overrides_by_stem(self) -> None:
-        sf = next(f for f in fonts.FAMILIES if f.package == "sf")
-        names = sorted(p.name for p in fonts.source_files(sf, BY_ID["sf"].manifest(), "450"))
+        names = sorted(p.name for p in fonts.source_files(BY_ID["sf"], BY_ID["sf"].manifest(), "450"))
         self.assertEqual(names, ["SF-Mono-Regular.otf", "SF-Pro-Text-Regular.ttf"])
 
     def test_missing_package_installs_nothing(self) -> None:
@@ -168,10 +167,10 @@ class FontsTest(TempHome):
                                      "450": ["Roboto-Regular.ttf"]})
         st = dict(DEFAULTS, ui_weight="450", darkening="0.50")
         sets = fonts.plan(st)
-        rob = next(fs for fs in sets if fs.family.package == "roboto")
+        rob = next(fs for fs in sets if fs.family.id == "roboto")
         self.assertEqual(rob.darken, 0.5)
         self.assertTrue(any(p.name == "Roboto-Regular.ttf" and p.parent.name == "450" for p in rob.sources))
-        gs = next(fs for fs in sets if fs.family.package == "googlesans")
+        gs = next(fs for fs in sets if fs.family.id == "googlesans")
         self.assertEqual(gs.darken, 0.0)
         self.assertEqual([p.parent.name for p in gs.sources], ["400"])
         self.assertTrue(fonts.installed(sets, "googlesans"))
@@ -183,8 +182,8 @@ class FontsTest(TempHome):
         self.fake_package("ubuntumono", {"400": ["UbuntuSansMono-Regular.ttf"],
                                          "475": ["UbuntuSansMono-Regular.ttf"]})
         sets = fonts.plan(dict(DEFAULTS, ui_weight="450", mono_weight="475", darkening="0.50"))
-        sans = next(fs for fs in sets if fs.family.package == "ubuntu")
-        mono = next(fs for fs in sets if fs.family.package == "ubuntumono")
+        sans = next(fs for fs in sets if fs.family.id == "ubuntu")
+        mono = next(fs for fs in sets if fs.family.id == "ubuntumono")
         self.assertEqual((sans.darken, mono.darken), (0.5, 0.0))
         self.assertEqual({p.name: p.parent.name for p in sans.sources},
                          {"UbuntuSans-Regular.ttf": "450", "UbuntuSans-Bold.ttf": "400"})
@@ -333,20 +332,20 @@ class ChromiumTest(TempHome):
 
     def test_session_shim_env_drop_in(self) -> None:
         conf = paths.P.session_env_conf
-        self.assertIsNone(chromium.session_env_text(dict(DEFAULTS)))
-        self.assertFalse(chromium.apply_session_env(dict(DEFAULTS)))
+        self.assertIsNone(chromium.session_env_text(False))
+        self.assertFalse(chromium.apply_session_env(False))
         self.assertFalse(conf.exists())
         paths.P.old_session_env_conf.parent.mkdir(parents=True)
         paths.P.old_session_env_conf.write_text("LD_PRELOAD=x\n")
         conf.parent.mkdir(parents=True)
         conf.write_text("export FOO=1\n")
-        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="on")))
+        self.assertTrue(chromium.apply_session_env(True))
         self.assertFalse(paths.P.old_session_env_conf.exists())
         text = conf.read_text()
         self.assertTrue(text.startswith("export FOO=1\n"))
         self.assertIn("fontlab-text-shim.so", text)
         self.assertTrue(chromium.session_env_enabled())
-        self.assertFalse(chromium.apply_session_env(dict(DEFAULTS, session_shim="on")))
+        self.assertFalse(chromium.apply_session_env(True))
         # The block adds the shim once, also when LD_PRELOAD already has it.
         shim = str(paths.P.runtime_dir / "fontlab-text-shim.so")
         for before, after in (("", shim), ("/o.so", f"{shim}:/o.so"), (f"{shim}:/o.so", f"{shim}:/o.so")):
@@ -354,12 +353,12 @@ class ChromiumTest(TempHome):
             out = subprocess.run(["sh", "-c", f'. "{conf}"; printf %s "$LD_PRELOAD"'],
                                  env=env, capture_output=True, text=True, check=True).stdout
             self.assertEqual(out, after)
-        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="off")))
+        self.assertTrue(chromium.apply_session_env(False))
         self.assertEqual(conf.read_text(), "export FOO=1\n")
         self.assertFalse(chromium.session_env_enabled())
         conf.write_text("")
-        chromium.apply_session_env(dict(DEFAULTS, session_shim="on"))
-        self.assertTrue(chromium.apply_session_env(dict(DEFAULTS, session_shim="off")))
+        chromium.apply_session_env(True)
+        self.assertTrue(chromium.apply_session_env(False))
         self.assertFalse(conf.exists())
         self.assertEqual(chromium.merged_ld_preload(None, "/a/fontlab-text-shim.so"), "/a/fontlab-text-shim.so")
         self.assertEqual(chromium.merged_ld_preload("/other.so", "/a/fontlab-text-shim.so"),
@@ -418,7 +417,6 @@ class ShellNoticeTest(TempHome):
         self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]})
         with mock.patch.object(applymod, "fc_cache"), \
                 mock.patch.object(applymod.chromium, "apply", return_value=False), \
-                mock.patch.object(applymod.apps, "apply", return_value=False), \
                 mock.patch.object(desktop, "apply_gsettings", return_value=False), \
                 mock.patch.object(desktop, "environment_pending", return_value=False), \
                 mock.patch.object(desktop, "shell_restart_available", return_value=True):

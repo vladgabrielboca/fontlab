@@ -74,14 +74,11 @@ def compare_setup(state: State) -> tuple[dict[str, str], list[str]]:
 
     # The user's own fontconfig files stay; fontlab's two are swapped for the preset's.
     p = paths.P
+    render, web = fontconfig.confs(state, sets)
     ours = {p.render_conf.name: d / "render.conf"}
-    write_if_changed(ours[p.render_conf.name],
-                     fontconfig.render_conf(state, [g for fs in sets for g in fs.rejects],
-                                           google_sans=fonts.installed(sets, "googlesans")))
+    write_if_changed(ours[p.render_conf.name], render)
     windows = state["web_fonts"] == "windows"
-    web = None if windows else fontconfig.web_conf(state, inter_available=ctx.has("inter"),
-                                                   roboto=fonts.installed(sets, "roboto"))
-    if web:
+    if web and not windows:        # windows: Chromium's private config has no web conf
         write_if_changed(d / "web.conf", web)
         ours[p.web_conf.name] = d / "web.conf"
     own = {f.name: f for f in sorted(p.fontconfig_dir.glob("*.conf"))

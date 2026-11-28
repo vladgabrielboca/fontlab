@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-from . import apps, chromium, desktop, fontconfig, fonts, paths, vencord
+from . import chromium, desktop, fontconfig, fonts, paths, vencord
 from .availability import Context
 from .fsutil import remove, write_if_changed
 from .state import State
@@ -39,11 +39,8 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
         report.changed.append("fonts")
 
     progress("fontconfig")
-    rejects = [g for fs in sets for g in fs.rejects]
-    conf_changed = write_if_changed(paths.P.render_conf, fontconfig.render_conf(
-        state, rejects, google_sans=fonts.installed(sets, "googlesans")))
-    web = fontconfig.web_conf(state, inter_available=ctx.has("inter"),
-                              roboto=fonts.installed(sets, "roboto"))
+    render, web = fontconfig.confs(state, sets)
+    conf_changed = write_if_changed(paths.P.render_conf, render)
     conf_changed |= write_if_changed(paths.P.web_conf, web) if web else remove(paths.P.web_conf)
     if conf_changed:
         report.changed.append("fontconfig")
@@ -54,14 +51,8 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
         report.notices.append(desktop.SHELL_NOTICE)
 
     progress("chromium")
-    # Without the shim, undo any app wrapping and remove the session LD_PRELOAD drop-in so no
-    # launcher or session points at a missing .so.
     had_session_env = chromium.session_env_enabled()
-    if ctx.shim:
-        chromium_changed = chromium.apply(state)
-    else:
-        chromium_changed = chromium.apply_session_env({"session_shim": "off"}) | apps.apply(False)
-    if chromium_changed:
+    if chromium.apply(state, ctx.shim):
         report.changed.append("chromium")
     if chromium.session_env_enabled() != had_session_env:
         report.notices.append("session shim changed: log out and back in so your desktop picks it up")
@@ -89,11 +80,12 @@ def uninstall(purge: bool = False) -> list[str]:
     /etc/environment and the /usr/local/bin wrappers are left to uninstall.sh."""
     p = paths.P
     removed = []
-    apps.apply(False)
-    if chromium.apply_session_env({"session_shim": "off"}):
+    had_session_env = chromium.session_env_enabled()
+    chromium.remove_all()
+    if had_session_env:
         removed.append(f"fontlab block in {p.session_env_conf}")
-    vencord.apply({"vencord_fonts": "off"})
-    for f in (p.render_conf, p.web_conf, p.chromium_text_conf, p.chromium_fonts_conf, p.old_session_env_conf):
+    vencord.remove()
+    for f in (p.render_conf, p.web_conf):
         if remove(f):
             removed.append(str(f))
     if p.installed_fonts.exists():

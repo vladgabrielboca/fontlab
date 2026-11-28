@@ -28,16 +28,14 @@ from html import escape
 from pathlib import Path
 
 from . import apps, desktop, fontconfig, paths
-from .fsutil import remove, write_if_changed
-from .settings import BY_KEY
+from .fsutil import remove, replace_block, write_if_changed
+from .settings import BY_KEY, WEB_FONTS
 from .state import State
 
 # Launchers that get a wrapper when present in /usr/bin.
 APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
         "microsoft-edge-stable", "spotify", "discord")
 WRAPPER_MARK = apps.WRAPPER_MARK
-# What CSS system-ui should be for each web_fonts choice ("system": left to the desktop).
-SYSTEM_UI = {"inter": "Inter", "ubuntu": "Ubuntu Sans", "sf": "SF Pro Text", "windows": "Segoe UI"}
 
 
 def lcd_box(state: State) -> bool:
@@ -72,7 +70,7 @@ def gtk_ui_family() -> str | None:
 
 def system_ui_rule(state: State) -> str:
     """fontconfig rule sending the GTK UI font to the web font. Empty when there is nothing to do."""
-    target = SYSTEM_UI.get(state["web_fonts"])
+    target = WEB_FONTS[state["web_fonts"]].system_ui
     ui = gtk_ui_family() if target else None
     if not ui or ui == target:
         return ""
@@ -95,12 +93,8 @@ def hint_rule(state: State) -> str:
     style = state["chromium_hinting"]
     if style == state["hinting"] == state["mono_hinting"]:
         return ""
-    enabled = "false" if style == "none" else "true"
     out = ("  <!-- Chromium: grid fitting kept apart from the rest of the desktop. -->\n"
-           '  <match target="font">\n'
-           f'    <edit name="hinting" mode="assign"><bool>{enabled}</bool></edit>\n'
-           f'    <edit name="hintstyle" mode="assign"><const>hint{style}</const></edit>\n'
-           "  </match>\n")
+           '  <match target="font">\n' + fontconfig.hint_edits(style) + "  </match>\n")
     if fontconfig.darkening_on(state):
         out += fontconfig.icon_rules()
     return out
@@ -176,11 +170,11 @@ SESSION_END = "# fontlab end"
 _SESSION_BLOCK = re.compile(r"\n?# fontlab start[^\n]*\n.*?# fontlab end\n?", re.S)
 
 
-def session_env_text(state: State) -> str | None:
+def session_env_text(on: bool) -> str | None:
     """fontlab's block for ~/.config/uwsm/env, or None when off. The shim goes first in
     LD_PRELOAD, once: the systemd user manager may already carry it from an earlier login
     or from sync_systemd_session_env."""
-    if state.get("session_shim") != "on":
+    if not on:
         return None
     shim = paths.P.runtime_dir / "fontlab-text-shim.so"
     return (f"{SESSION_START}\n"
@@ -189,14 +183,6 @@ def session_env_text(state: State) -> str | None:
             f'  *) export LD_PRELOAD="{shim}${{LD_PRELOAD:+:$LD_PRELOAD}}" ;;\n'
             f"esac\n"
             f"{SESSION_END}\n")
-
-
-def with_session_block(text: str, block: str | None) -> str:
-    """text with fontlab's block replaced by block (None removes it); the rest is kept."""
-    rest = _SESSION_BLOCK.sub("\n", text).strip("\n")
-    if block is None:
-        return rest + "\n" if rest else ""
-    return f"{rest}\n\n{block}" if rest else block
 
 
 def _systemd_ld_preload() -> str | None:
@@ -265,20 +251,20 @@ def session_shim_active() -> bool:
     return "fontlab-text-shim.so" in os.environ.get("LD_PRELOAD", "") or _compositor_has_shim()
 
 
-def apply_session_env(state: State) -> bool:
+def apply_session_env(on: bool) -> bool:
     """Add or remove fontlab's block in ~/.config/uwsm/env and sync systemd --user.
     Returns True when something changed."""
     p = paths.P.session_env_conf
-    block = session_env_text(state)
+    block = session_env_text(on)
     old = p.read_text() if p.exists() else ""
-    new = with_session_block(old, block)
+    new = replace_block(old, _SESSION_BLOCK, block)
     if new == old:
         changed = False
     elif new:
         changed = write_if_changed(p, new)
     else:
         changed = remove(p)
-    changed |= remove(paths.P.old_session_env_conf)
+    changed |= remove(paths.P.old_session_env_conf)    # location used before 2026-11-25
     changed |= sync_systemd_session_env(block is not None)
     return changed
 
@@ -289,8 +275,18 @@ def session_env_enabled() -> bool:
     return p.exists() and SESSION_START in p.read_text()
 
 
-def apply(state: State) -> bool:
-    """Returns True when something changed."""
+def remove_all() -> bool:
+    """Undo everything: text and font confs, session block, wrapped desktop entries."""
+    p = paths.P
+    changed = remove(p.chromium_text_conf) | remove(p.chromium_fonts_conf)
+    return changed | apply_session_env(False) | apps.apply(False)
+
+
+def apply(state: State, shim: bool) -> bool:
+    """Returns True when something changed. Without the shim nothing could read the
+    files, and launchers must not point at a missing .so, so everything is undone."""
+    if not shim:
+        return remove_all()
     p = paths.P
     text = text_conf(state)
     changed = write_if_changed(p.chromium_text_conf, text) if text else remove(p.chromium_text_conf)
@@ -302,6 +298,6 @@ def apply(state: State) -> bool:
         if state["web_fonts"] == "windows":
             env = dict(os.environ, FONTCONFIG_FILE=str(p.chromium_fonts_conf))
             subprocess.run(["fc-cache", str(p.windows_fonts)], env=env, check=False)
-    changed |= apply_session_env(state)
+    changed |= apply_session_env(state["session_shim"] == "on")
     changed |= apps.apply(text is not None or conf is not None)
     return changed

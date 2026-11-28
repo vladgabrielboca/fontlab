@@ -25,6 +25,7 @@ Results are cached by program path, size and mtime, so later applies are fast.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 import shutil
@@ -90,7 +91,6 @@ class App:
 
 # --- desktop entries --------------------------------------------------------------
 def system_dirs() -> list[Path]:
-    import os
     dirs = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
     return [Path(d) / "applications" for d in dirs.split(":") if d]
 

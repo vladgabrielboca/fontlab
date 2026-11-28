@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import paths
 from .fsutil import link_or_copy, replace_dir
-from .packages import BY_ID, Manifest
+from .packages import PACKAGES, Manifest, Package
 from .state import State
 from .toolchain import run_builder
 
@@ -32,30 +32,15 @@ class FontError(RuntimeError):
     pass
 
 
-@dataclass(frozen=True)
-class Family:
-    package: str
-    weight_key: str | None   # setting that picks the weight; None = always 400
-    darkens: bool            # gets the `darkening` setting (TrueType outlines only)
-    system_base: bool = False   # weight 400 is the system font itself: install nothing
-
-
-FAMILIES: tuple[Family, ...] = (
-    Family("inter", "ui_weight", darkens=True),
-    Family("adwaita", "ui_weight", darkens=True),
-    Family("jbm", "mono_weight", darkens=False, system_base=True),
-    Family("sf", "sf_weight", darkens=False),
-    Family("googlesans", None, darkens=False),   # stock, so it matches Google's web font
-    Family("roboto", "ui_weight", darkens=True),
-    Family("ubuntu", "ui_weight", darkens=True),
-    Family("ubuntumono", "mono_weight", darkens=False),
-)
+def families() -> list[Package]:
+    """Packages whose files fontlab installs as desktop fonts, one folder each."""
+    return [p for p in PACKAGES if p.installs]
 
 
 @dataclass(frozen=True)
 class FontSet:
     """What one family folder should contain. No sources = no folder."""
-    family: Family
+    family: Package
     key: str                 # identifies the content; written to the marker file
     sources: tuple[Path, ...]
     darken: float
@@ -66,8 +51,8 @@ class FontSet:
         return self.replaces if self.sources else ()
 
 
-def source_files(family: Family, manifest: Manifest, weight: str) -> list[Path]:
-    root = paths.P.sources / family.package
+def source_files(family: Package, manifest: Manifest, weight: str) -> list[Path]:
+    root = family.root
     if weight not in manifest.weights:
         weight = "400"
     base = [] if family.system_base else sorted((root / "400").glob("*.[ot]tf"))
@@ -75,15 +60,15 @@ def source_files(family: Family, manifest: Manifest, weight: str) -> list[Path]:
         return base
     overrides = sorted((root / weight).glob("*.[ot]tf"))
     if not overrides:
-        raise FontError(f"{family.package}: no files for weight {weight} in {root / weight}")
+        raise FontError(f"{family.id}: no files for weight {weight} in {root / weight}")
     replaced = {f.stem for f in overrides}
     return [f for f in base if f.stem not in replaced] + overrides
 
 
 def plan(state: State) -> list[FontSet]:
     sets = []
-    for family in FAMILIES:
-        manifest = BY_ID[family.package].manifest()
+    for family in families():
+        manifest = family.manifest()
         if manifest is None:
             sets.append(FontSet(family, "", (), 0.0, ()))
             continue
@@ -98,11 +83,11 @@ def plan(state: State) -> list[FontSet]:
 
 def installed(sets: list[FontSet], package: str) -> bool:
     """Whether the plan installs any files for this package."""
-    return any(fs.sources for fs in sets if fs.family.package == package)
+    return any(fs.sources for fs in sets if fs.family.id == package)
 
 
 def _build_dir(fs: FontSet) -> Path:
-    return paths.P.builds_dir / f"{fs.family.package}-{fs.key}"
+    return paths.P.builds_dir / f"{fs.family.id}-{fs.key}"
 
 
 def realize(sets: list[FontSet]) -> dict[str, list[Path]]:
@@ -111,14 +96,14 @@ def realize(sets: list[FontSet]) -> dict[str, list[Path]]:
     pending: list[tuple[FontSet, Path]] = []
     for fs in sets:
         if fs.darken == 0:
-            final[fs.family.package] = list(fs.sources)
+            final[fs.family.id] = list(fs.sources)
             continue
         out = _build_dir(fs)
         if (out / MARKER).exists():
             os.utime(out)
         else:
             pending.append((fs, out))
-        final[fs.family.package] = [out / f.name for f in fs.sources]
+        final[fs.family.id] = [out / f.name for f in fs.sources]
 
     if pending:
         jobs = ""
@@ -145,8 +130,8 @@ def _prune_builds() -> None:
         shutil.rmtree(old, ignore_errors=True)
 
 
-def installed_key(family: Family) -> str | None:
-    marker = paths.P.installed_fonts / family.package / MARKER
+def installed_key(family: Package) -> str | None:
+    marker = paths.P.installed_fonts / family.id / MARKER
     return marker.read_text().strip() if marker.exists() else None
 
 
@@ -159,19 +144,19 @@ def install(state: State) -> tuple[bool, list[FontSet]]:
     files = realize([fs for fs in todo if fs.sources])
     root = paths.P.installed_fonts
     root.mkdir(parents=True, exist_ok=True)
-    dirs = [root] + [root / fs.family.package for fs in todo]
+    dirs = [root] + [root / fs.family.id for fs in todo]
     before = {d: d.stat().st_mtime_ns for d in dirs if d.exists()}
     for fs in todo:
         # A family without files keeps an empty folder, so the folder never comes and
         # goes and its old mtime is always known to newer_than() below.
-        stage = root / f".{fs.family.package}.stage"
+        stage = root / f".{fs.family.id}.stage"
         shutil.rmtree(stage, ignore_errors=True)
         stage.mkdir()
         if fs.sources:
-            for f in files[fs.family.package]:
+            for f in files[fs.family.id]:
                 link_or_copy(f, stage / f.name)
             (stage / MARKER).write_text(fs.key + "\n")
-        replace_dir(stage, root / fs.family.package)
+        replace_dir(stage, root / fs.family.id)
     for d, old in before.items():
         newer_than(d, old)
     return True, sets

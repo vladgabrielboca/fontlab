@@ -21,11 +21,10 @@ from pathlib import Path
 from . import desktop, paths, state as statefile
 from .apply import apply
 from .availability import Context
-from .packages import PACKAGES, Package, SFPro, WindowsFonts
+from .packages import PACKAGES, Package
 from .preview import Preview
 from .settings import SETTINGS, Setting
 from .state import State, StateError
-from .toolchain import seven_zip
 
 LOGO = ("█▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄",
         "█▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█")
@@ -181,7 +180,7 @@ class Screen:
             self.put(y, x, "✓ installed", self.OK | curses.A_BOLD)
             self.put(y, x + 13, m.version, curses.A_DIM)
         else:
-            blocker = None if p.needs_folder or isinstance(p, SFPro) else p.blocker()
+            blocker = p.unavailable()
             self.put(y, x, f"  {blocker}" if blocker else "  not installed, enter installs", curses.A_DIM)
 
     def draw(self) -> None:
@@ -346,27 +345,17 @@ class Screen:
         self.ctx = Context.detect()
 
     def install(self, p: Package) -> None:
-        folder: Path | None = None
-        if isinstance(p, SFPro):
-            options = (["Download from Apple"] if seven_zip() else []) + ["Import from a folder"]
-            how = self.pick(p.name, options)
-            if how is None:
+        sources = p.install_sources()
+        if len(sources) == 1:
+            source = sources[0]
+        else:
+            label = self.pick(p.name, [s.label for s in sources])
+            source = next((s for s in sources if s.label == label), None)
+            if source is None:
                 return
-            if how.startswith("Import"):
-                folder = self.ask_folder("folder with the SF fonts (.otf/.ttf): ")
-                if folder is None:
-                    return
-            elif not seven_zip():
-                self.message = p.blocker() or ""
-                return
-        elif isinstance(p, WindowsFonts):
-            found = [str(f) for f in WindowsFonts.detect()]
-            choice = self.pick(p.name, [*found, "Type a folder path…"]) if found else "Type a folder path…"
-            if choice is None:
-                return
-            folder = Path(choice) if choice in found else self.ask_folder("Windows Fonts folder: ")
-            if folder is None:
-                return
+        folder = source.folder
+        if source.ask and (folder := self.ask_folder(f"{p.name} folder: ")) is None:
+            return
         if blocker := p.blocker(folder):
             self.message = blocker
             return

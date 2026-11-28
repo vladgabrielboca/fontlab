@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -16,6 +17,15 @@ def write_if_changed(path: Path, text: str) -> bool:
     tmp.write_text(text)
     tmp.replace(path)
     return True
+
+
+def replace_block(text: str, pattern: re.Pattern[str], block: str | None) -> str:
+    """text with fontlab's marked block (matched by pattern) swapped for block, at the end.
+    None removes it. Everything else in the file is kept."""
+    rest = pattern.sub("\n", text).strip("\n")
+    if block is None:
+        return rest + "\n" if rest else ""
+    return f"{rest}\n\n{block}" if rest else block
 
 
 def remove(path: Path) -> bool:

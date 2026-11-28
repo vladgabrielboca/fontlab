@@ -24,9 +24,10 @@ from pathlib import Path
 from . import paths
 from .download import fetch
 from .fsutil import replace_dir
+from .settings import WEIGHTS as ALL_WEIGHTS
 from .toolchain import Progress, ToolError, run, run_builder, seven_zip
 
-WEIGHTS = ("430", "450", "475", "500")
+WEIGHTS = ALL_WEIGHTS[1:]        # built on top of the stock 400
 SYSTEM_FONT_DIRS = (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))
 
 
@@ -57,6 +58,14 @@ def find_fonts(pattern: str) -> list[Path]:
     return sorted(found)
 
 
+@dataclass(frozen=True)
+class Source:
+    """One way to install a package."""
+    label: str
+    folder: Path | None = None   # import from this folder (None: download or build locally)
+    ask: bool = False            # the user types the folder
+
+
 def _extract_zip(archive: Path, dest: Path) -> Path:
     with zipfile.ZipFile(archive) as z:
         z.extractall(dest)
@@ -69,7 +78,21 @@ class Package:
     summary: str = ""
     optional: bool = False
     license_note: str | None = None     # shown and confirmed before installing
-    needs_folder: bool = False          # can only be imported from a folder
+    # How fonts.py installs the files into ~/.local/share/fonts/fontlab:
+    installs: bool = True               # False: not a desktop font (Windows fonts, Chromium only)
+    weight_key: str | None = None       # setting that picks the weight; None = always 400
+    darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
+    system_base: bool = False           # weight 400 is the system font itself: install nothing
+
+    def install_sources(self) -> list[Source]:
+        """Ways to install, first one is the default."""
+        return [Source("Download")]
+
+    def unavailable(self) -> str | None:
+        """Why no source can work here, or None. A source the user types never counts as blocked."""
+        if any(s.ask for s in self.install_sources()):
+            return None
+        return self.blocker()
 
     @property
     def root(self) -> Path:
@@ -120,6 +143,7 @@ class Package:
 
 class Inter(Package):
     id, name = "inter", "Inter"
+    weight_key, darkens = "ui_weight", True
     summary = "UI and web font, with heavier weights. Downloaded from github.com/rsms/inter."
     VERSION = "4.1"
     URL = f"https://github.com/rsms/inter/releases/download/v{VERSION}/Inter-{VERSION}.zip"
@@ -140,6 +164,10 @@ class Inter(Package):
 
 class AdwaitaSans(Package):
     id, name = "adwaita", "Adwaita Sans"
+    weight_key, darkens = "ui_weight", True
+
+    def install_sources(self):
+        return [Source("Build from the installed copy")]
     summary = "GNOME's UI font (GTK, Chromium tabs), rebuilt as static files with heavier weights."
 
     def system_files(self) -> tuple[Path, Path] | None:
@@ -159,6 +187,10 @@ class AdwaitaSans(Package):
 
 class JetBrainsMono(Package):
     id, name = "jbm", "JetBrains Mono"
+    weight_key, system_base = "mono_weight", True
+
+    def install_sources(self):
+        return [Source("Build on the installed copy")]
     summary = "Heavier JetBrains Mono (or its Nerd Font) built on your installed copy."
     VERSION = "2.304"
     URL = f"https://github.com/JetBrains/JetBrainsMono/releases/download/v{VERSION}/JetBrainsMono-{VERSION}.zip"
@@ -210,6 +242,7 @@ class GoogleSansFlex(Package):
 
 class Roboto(Package):
     id, name = "roboto", "Roboto"
+    weight_key, darkens = "ui_weight", True
     summary = ("Darkened local Roboto with heavier weights. Keeps Roboto on sites like YouTube "
                "(when remote Roboto webfonts are blocked) instead of aliasing it to Inter.")
     optional = True
@@ -237,6 +270,7 @@ class Roboto(Package):
 
 class UbuntuSans(Package):
     id, name = "ubuntu", "Ubuntu Sans"
+    weight_key, darkens = "ui_weight", True
     summary = ("Ubuntu's UI font (24.04 and later), built as static faces with heavier weights and "
                "darkening. Downloaded from github.com/canonical/Ubuntu-Sans-fonts.")
     optional = True
@@ -266,6 +300,7 @@ class UbuntuSans(Package):
 
 class UbuntuSansMono(UbuntuSans):
     id, name = "ubuntumono", "Ubuntu Sans Mono"
+    weight_key, darkens = "mono_weight", False
     summary = ("Ubuntu's monospace font, static faces with heavier weights. Downloaded from "
                "github.com/canonical/Ubuntu-Sans-Mono-fonts. Make it the terminal font with: "
                "omarchy font set \"Ubuntu Sans Mono\"")
@@ -280,6 +315,7 @@ class UbuntuSansMono(UbuntuSans):
 
 class SFPro(Package):
     id, name = "sf", "SF Pro (Apple)"
+    weight_key = "sf_weight"
     summary = "Apple's system fonts: SF Pro, SF Mono, New York. Downloaded from Apple, needs 7-Zip."
     optional = True
     license_note = ("Apple licenses the SF fonts only for creating mockups of user interfaces for "
@@ -288,6 +324,9 @@ class SFPro(Package):
                  for n in ("SF-Pro", "SF-Mono", "NY"))
     STATIC = ("SF-Pro-Text-*.otf", "SF-Pro-Display-*.otf", "SF-Pro-Rounded-*.otf",
               "SF-Mono-*.otf", "NewYorkSmall-*.otf")
+
+    def install_sources(self):
+        return ([Source("Download from Apple")] if seven_zip() else []) + [Source("Import from a folder", ask=True)]
 
     def blocker(self, folder=None):
         if folder:
@@ -330,7 +369,7 @@ class WindowsFonts(Package):
     id, name = "windows", "Windows 11 fonts"
     summary = "Arial, Segoe UI, Consolas... Chromium only. Import from a Windows Fonts folder."
     optional = True
-    needs_folder = True
+    installs = False
     license_note = ("Microsoft licenses these fonts for use with Windows. Import them only if "
                     "your license allows it.")
     REQUIRED = ("arial.ttf", "segoeui.ttf")
@@ -341,6 +380,9 @@ class WindowsFonts(Package):
     def detect(cls) -> list[Path]:
         """Mounted Windows partitions."""
         return [Path(p) for pat in cls.CANDIDATES for p in glob.glob(pat)]
+
+    def install_sources(self):
+        return [Source(str(f), folder=f) for f in self.detect()] + [Source("Type a folder path", ask=True)]
 
     def blocker(self, folder=None):
         if folder is None:
@@ -361,4 +403,12 @@ PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), Google
                                   UbuntuSans(), UbuntuSansMono(), SFPro(), WindowsFonts())
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
-__all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "ToolError", "WEIGHTS"]
+
+
+def unlocking(key: str) -> list[Package]:
+    """Packages that give a setting something to act on (weights, darkening)."""
+    return [p for p in PACKAGES if p.weight_key == key or (key == "darkening" and p.darkens)]
+
+
+__all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "Source", "ToolError", "WEIGHTS",
+           "unlocking"]

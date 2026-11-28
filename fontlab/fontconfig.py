@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from html import escape
 
 from . import paths
+from .settings import WEB_FONTS
 from .state import State
 
 HEADER = """<?xml version="1.0"?>
@@ -27,8 +28,6 @@ LCDFILTER = {"default": "lcddefault", "light": "lcdlight", "legacy": "lcdlegacy"
 SANS_NAMES = ("sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Roboto", "Arial",
               "Helvetica", "Helvetica Neue", "Segoe UI")
 SF_EXTRA_NAMES = ("SF Pro", ".SF NS", "SF UI Text")
-# web_fonts choices that are one family under every sans name (sf has its own rules).
-WEB_FAMILY = {"inter": "Inter", "ubuntu": "Ubuntu Sans"}
 
 # macOS details for the SF mapping: Display at 20pt+, SF Mono and New York for their
 # generic names, and New York Small's odd Bold/Black weights fixed so bold picks Bold.
@@ -85,7 +84,7 @@ def icon_rules() -> str:
     return out
 
 
-def _hint_edits(style: str, indent: str) -> str:
+def hint_edits(style: str, indent: str = "    ") -> str:
     enabled = "false" if style == "none" else "true"
     return (f'{indent}<edit name="hinting" mode="assign"><bool>{enabled}</bool></edit>\n'
             f'{indent}<edit name="hintstyle" mode="assign"><const>hint{style}</const></edit>\n')
@@ -98,11 +97,11 @@ def render_conf(state: State, rejects: Iterable[str], google_sans: bool = False)
     out += '    <edit name="antialias" mode="assign"><bool>true</bool></edit>\n'
     out += f'    <edit name="rgba" mode="assign"><const>{RGBA[state["antialias"]]}</const></edit>\n'
     out += f'    <edit name="lcdfilter" mode="assign"><const>{LCDFILTER[state["lcdfilter"]]}</const></edit>\n'
-    out += _hint_edits(state["hinting"], "    ")
+    out += hint_edits(state["hinting"])
     out += "  </match>\n"
     out += '  <match target="font">\n'
     out += '    <test name="spacing" compare="eq"><const>mono</const></test>\n'
-    out += _hint_edits(state["mono_hinting"], "    ")
+    out += hint_edits(state["mono_hinting"])
     out += "  </match>\n"
     if state["small_bold"] == "on":
         out += '  <match target="font">\n'
@@ -167,9 +166,19 @@ def web_conf(state: State, inter_available: bool, roboto: bool = False) -> str |
         return None
     rewrites = system_sans_rewrites()
     sans = [n for n in SANS_NAMES if not (roboto and n == "Roboto")]
-    if choice in WEB_FAMILY:
-        body = _aliases([*sans, *rewrites], WEB_FAMILY[choice])
+    family = WEB_FONTS[choice].family
+    if choice == "sf":                 # macOS's extra names, Display, Mono and New York
+        body = _aliases([*sans, *SF_EXTRA_NAMES, *rewrites], family) + SF_RULES
     else:
-        body = _aliases([*sans, *SF_EXTRA_NAMES, *rewrites], "SF Pro Text") + SF_RULES
+        body = _aliases([*sans, *rewrites], family)
     note = ("  <!-- prepend+strong keeps the rest of the list, so CJK, emoji and icons still fall back. -->\n")
     return HEADER + "<fontconfig>\n" + note + body + "</fontconfig>\n"
+
+
+def confs(state: State, sets) -> tuple[str, str | None]:
+    """(70-fontlab-render.conf, 71-fontlab-web.conf or None) for a state and its font plan
+    (fonts.plan). Shared by apply and the preset comparison window."""
+    have = {fs.family.id for fs in sets if fs.sources}
+    rejects = [g for fs in sets for g in fs.rejects]
+    return (render_conf(state, rejects, google_sans="googlesans" in have),
+            web_conf(state, inter_available="inter" in have, roboto="roboto" in have))
