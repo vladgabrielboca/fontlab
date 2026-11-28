@@ -36,6 +36,21 @@ from .state import State
 APPS = ("chromium", "google-chrome-stable", "brave", "brave-browser", "brave-origin", "vivaldi-stable",
         "microsoft-edge-stable", "spotify", "discord")
 WRAPPER_MARK = apps.WRAPPER_MARK
+BROWSERS = APPS[:7]   # the ones that can show a test page with --app
+
+
+def browser(real: bool = False) -> str | None:
+    """A Chromium-family browser for the preview windows, first one in BROWSERS order.
+    real=True skips fontlab's /usr/local/bin wrappers, so no live settings are added;
+    real=False prefers the wrapper, so the window gets the applied settings."""
+    for app in BROWSERS:
+        if Path(f"/usr/bin/{app}").exists():
+            return f"/usr/bin/{app}" if real else shutil.which(app) or f"/usr/bin/{app}"
+    for app in BROWSERS:   # installed elsewhere in PATH (not through a dangling wrapper)
+        found = shutil.which(app)
+        if found and not apps.is_fontlab_wrapper(Path(found)):
+            return found
+    return None
 
 
 def lcd_box(state: State) -> bool:

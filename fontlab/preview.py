@@ -5,7 +5,8 @@ through the /usr/local/bin wrapper like any other Chromium launch, so it gets th
 the private font config.
 
 The comparison window shows a saved preset without applying it. It starts the real
-/usr/bin/chromium with its own fontconfig file: the preset's render rules and font
+browser in /usr/bin (chromium, or the first other one in chromium.BROWSERS) with its own
+fontconfig file: the preset's render rules and font
 files, the user's other fontconfig files, fontlab's installed fonts hidden. When the
 preset changes contrast or gamma, the shim reads the preset's values instead.
 FreeType darkening and gsettings are left out: neither changes web page text.
@@ -49,11 +50,6 @@ def page(state: State, label: str = "current settings") -> str:
     template = (paths.DATA_DIR / "preview.html").read_text()
     return (template.replace("{{LABEL}}", escape(label)).replace("{{SETTINGS}}", escape(settings))
             .replace("{{PANELS}}", panels))
-
-
-def real_chromium() -> str | None:
-    """/usr/bin/chromium, skipping fontlab's wrapper, which would add the live settings."""
-    return "/usr/bin/chromium" if Path("/usr/bin/chromium").exists() else shutil.which("chromium")
 
 
 def compare_setup(state: State) -> tuple[dict[str, str], list[str]]:
@@ -123,9 +119,9 @@ class Preview:
     def show(self, state: State, label: str = "current settings", browser: str | None = None,
              env: dict[str, str] | None = None, args: list[str] | None = None) -> str | None:
         """(Re)start the window. Returns an error message or None."""
-        browser = browser or shutil.which("chromium")
+        browser = browser or chromium.browser()
         if not browser:
-            return "chromium not found in PATH"
+            return "no Chromium-based browser found (" + ", ".join(chromium.BROWSERS) + ")"
         d = paths.P.preview_dir
         d.mkdir(parents=True, exist_ok=True)
         html = d / f"{self.name}.html"
@@ -140,8 +136,11 @@ class Preview:
 
     def compare(self, state: State, label: str) -> str | None:
         """Show a state that is not applied (a saved preset). Returns an error or None."""
+        browser = chromium.browser(real=True)
+        if not browser:
+            return "no Chromium-based browser found outside fontlab's wrappers"
         env, args = compare_setup(state)
-        return self.show(state, label, browser=real_chromium(), env=env, args=args)
+        return self.show(state, label, browser=browser, env=env, args=args)
 
     def stop(self) -> None:
         if not self.running:

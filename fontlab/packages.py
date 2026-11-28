@@ -42,6 +42,7 @@ class Manifest:
     replaces: list[str] = field(default_factory=list)   # system files hidden while installed
     # System files the build read, with fingerprint(): a package update changes them.
     inputs: dict[str, str] = field(default_factory=dict)
+    build: int = 0      # Package.BUILD when it was installed
 
 
 def fingerprint(path: Path) -> str:
@@ -98,6 +99,9 @@ class Package:
     weight_key: str | None = None       # setting that picks the weight; None = always 400
     darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
     system_base: bool = False           # weight 400 is the system font itself: install nothing
+    # Bump when a builder change alters this package's files, so existing installs are told
+    # to reinstall. 1: hinting dropped from instances away from the default master.
+    BUILD: int = 0
     built_on_system: bool = False       # built from installed system files (Manifest.inputs)
 
     def install_sources(self) -> list[Source]:
@@ -139,6 +143,11 @@ class Package:
             return []
         return [f for f in manifest.replaces if Path(f).exists() and Path(f).stat().st_ctime > built + 1]
 
+    def old_build(self, manifest: Manifest | None = None) -> bool:
+        """Installed by a fontlab whose builder made different files. They still work."""
+        manifest = manifest or self.manifest()
+        return manifest is not None and manifest.build < self.BUILD
+
     def blocker(self, folder: Path | None = None) -> str | None:
         """Why this package cannot be installed here, or None."""
         return None
@@ -161,6 +170,7 @@ class Package:
         except BaseException:
             shutil.rmtree(stage, ignore_errors=True)
             raise
+        manifest.build = self.BUILD
         (stage / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2) + "\n")
         for f in stage.rglob("*"):
             if f.is_file():
@@ -278,7 +288,7 @@ class Roboto(Package):
     weight_key, darkens = "ui_weight", True
     summary = ("Darkened local Roboto with heavier weights. Keeps Roboto on sites like YouTube "
                "(when remote Roboto webfonts are blocked) instead of aliasing it to Inter.")
-    optional = True
+    optional, BUILD = True, 1
     VERSION = "3.015"
     COMMIT = "1c627bfa375fc51cf86fabeca4f6e08a95f0aa5c"
     BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/roboto"
@@ -306,7 +316,7 @@ class UbuntuSans(Package):
     weight_key, darkens = "ui_weight", True
     summary = ("Ubuntu's UI font (24.04 and later), built as static faces with heavier weights and "
                "darkening. Downloaded from github.com/canonical/Ubuntu-Sans-fonts.")
-    optional = True
+    optional, BUILD = True, 1
     VERSION = "1.006"
     URL = (f"https://github.com/canonical/Ubuntu-Sans-fonts/releases/download/v{VERSION}/"
            f"UbuntuSans-fonts-{VERSION}.zip")
@@ -439,10 +449,17 @@ BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 
 def outdated_notices() -> list[str]:
-    """One notice per package whose system source changed since it was built."""
-    return [f"{p.name}: the system copy changed since fontlab built it, so the system font is "
-            f"used for now. Rebuild with: fontlab fonts install {p.id}"
-            for p in PACKAGES if p.changed_inputs()]
+    """One notice per package whose system source changed since it was built, or that an
+    older builder made."""
+    out = []
+    for p in PACKAGES:
+        if p.changed_inputs():
+            out.append(f"{p.name}: the system copy changed since fontlab built it, so the system "
+                       f"font is used for now. Rebuild with: fontlab fonts install {p.id}")
+        elif p.old_build():
+            out.append(f"{p.name}: built by an older fontlab, whose files are out of date. "
+                       f"Rebuild with: fontlab fonts install {p.id}")
+    return out
 
 
 def unlocking(key: str) -> list[Package]:

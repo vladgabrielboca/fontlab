@@ -127,8 +127,15 @@ def realize(sets: list[FontSet]) -> dict[str, list[Path]]:
 
 
 def _prune_builds() -> None:
-    builds = sorted((d for d in paths.P.builds_dir.iterdir() if d.is_dir()),
-                    key=lambda d: d.stat().st_mtime, reverse=True)
+    """Keep the KEEP_BUILDS newest builds. Leftover .tmp folders (an interrupted build) go
+    first and never count, so they cannot push out a build in use."""
+    builds = []
+    for d in paths.P.builds_dir.iterdir():
+        if d.is_dir() and d.name.endswith(".tmp"):
+            shutil.rmtree(d, ignore_errors=True)
+        elif d.is_dir():
+            builds.append(d)
+    builds.sort(key=lambda d: d.stat().st_mtime, reverse=True)
     for old in builds[KEEP_BUILDS:]:
         shutil.rmtree(old, ignore_errors=True)
 

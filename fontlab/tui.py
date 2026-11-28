@@ -204,6 +204,8 @@ class Screen:
         m = self.ctx.manifests.get(p.id)
         if m and p.changed_inputs(m):
             self.put(y, x, "! system copy changed: enter to update", self.WARN)
+        elif m and p.old_build(m):
+            self.put(y, x, "! built by an older fontlab: enter to update", self.WARN)
         elif m:
             self.put(y, x, "✓ " + m.version, self.OK)
         elif blocker := p.unavailable():

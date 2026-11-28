@@ -14,6 +14,7 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
    - Strip `STAT` and `avar` tables on static instances. Set `OS/2.usWeightClass`, `OS/2.fsSelection`, `head.macStyle`, and `name` IDs (`1, 2, 4, 6, 16, 17`) so apps treat heavier Regular/Italic builds as weight `400`.
    - Check whether the source has TrueType hinting tables (`fpgm`, `prep`, `cvt `, `gasp`). If outlines change without matching instructions (as in `jetbrains_mono`), strip those tables and the per-glyph programs.
    - Register the builder command in `builders/run.py` (`nfixed` and `builder` maps).
+   - When you change an existing builder's output, bump `BUILD` on every package that uses it (`packages.py`), so installed copies get a rebuild notice.
 
 2. **Package (`fontlab/packages.py`)**:
    - Subclass `Package` with `id`, `name`, `summary`, `optional`, and `license_note` if needed.

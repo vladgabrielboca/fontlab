@@ -4,7 +4,8 @@
 #   2. build the Chromium text shim, copy runtime files
 #   3. link ~/.local/bin/fontlab to this checkout
 #   4. install launch wrappers for the Chromium-family apps found (sudo)
-# Options: --no-wrappers  skip step 4 (contrast/gamma then stay unavailable)
+# Options: --no-wrappers  skip step 4 (browsers started from a terminal then get no settings;
+#                          launcher entries still start through fontlab)
 set -euo pipefail
 cd "$(dirname "$(realpath "$0")")"
 RUNTIME="$HOME/.local/share/fontlab/runtime"
@@ -20,7 +21,6 @@ ln -sfn "$PWD/bin/fontlab" "$HOME/.local/bin/fontlab"
 echo "command: ~/.local/bin/fontlab -> $PWD/bin/fontlab"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "note: add ~/.local/bin to your PATH";; esac
 
-[ $WRAPPERS = 1 ] || { echo "skipped Chromium wrappers"; exit 0; }
 if ! command -v cc >/dev/null; then
   echo "note: no C compiler (cc), skipping the Chromium shim. Install gcc and run this again."
   exit 0
@@ -31,6 +31,7 @@ install -m755 chromium/fontlab-text-shim.so "$RUNTIME/"
 install -m644 chromium/chromium-env.sh "$RUNTIME/"
 install -m755 chromium/fontlab-launch "$RUNTIME/"
 echo "runtime: $RUNTIME"
+[ $WRAPPERS = 1 ] || { echo "skipped the /usr/local/bin wrappers (--no-wrappers)"; exit 0; }
 
 APPS=$(python3 -c 'import sys; sys.path.insert(0, "."); from fontlab.chromium import APPS; print(*APPS)')
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT

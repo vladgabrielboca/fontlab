@@ -23,13 +23,13 @@ Then run `fontlab`.
 
 You need Python 3.11 or newer and fontconfig. These are optional:
 
-- `gcc` lets fontlab change text contrast and gamma in Chromium and Electron apps. Without it, those two settings are greyed out.
+- `gcc` builds the small library fontlab loads into Chromium and Electron apps. It sets their text contrast, gamma, subpixel filter and hinting, and their private font config (fontlab's font aliases and `system-ui` font). Without it, the Chromium settings are greyed out.
 - `uv` or `python-fonttools` builds the heavier font weights. If you have neither, fontlab sets up its own copy the first time.
 - `7z` lets fontlab download SF Pro from Apple. Without it, you can still add SF Pro from a folder.
 
 `install.sh` asks for your password once. It needs it to add small launch scripts to
 `/usr/local/bin` for Chromium, Brave, Chrome, Vivaldi, Edge, Spotify and Discord, so
-they get your contrast and gamma when you start them from a terminal. If you don't want
+they get your settings when you start them from a terminal. If you don't want
 that, run `./install.sh --no-wrappers`.
 
 Run `./install.sh` again after you `git pull`.

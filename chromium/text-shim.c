@@ -327,7 +327,7 @@ int execvp(const char *file, char *const argv[]) {
   ENSURE(execvp); ENSURE(execvpe);
   char *a[MAX_ARGS], *e[MAX_ENV];
   char *const *env = child_env(environ, e);
-  if (env != environ) return real_execvpe(file, child_argv(argv, a), env);
+  if (env != environ && real_execvpe) return real_execvpe(file, child_argv(argv, a), env);
   return real_execvp(file, child_argv(argv, a));
 }
 

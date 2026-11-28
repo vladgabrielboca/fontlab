@@ -72,7 +72,7 @@ fontlab doctor
 
 1. **Leave the user's live config untouched during tests and research.**
    - Unit tests call `paths.configure(tmp_home)`.
-   - Benchmarks run in temp directories with isolated `FONTCONFIG_FILE`, `FONTLAB_TEXT_CONF`, and `/usr/bin/chromium` (bypassing `/usr/local/bin/chromium`). Do not write to `~/.config/fontlab/state.toml` or fill `~/.cache/fontlab/builds` (`KEEP_BUILDS = 16`).
+   - Benchmarks run in temp directories with isolated `FONTCONFIG_FILE`, `FONTLAB_TEXT_CONF`, and the real browser binary from `chromium.browser(real=True)` (bypassing the `/usr/local/bin` wrappers). Do not write to `~/.config/fontlab/state.toml` or fill `~/.cache/fontlab/builds` (`KEEP_BUILDS = 16`).
 
 2. **Keep `state.toml` as the single source of truth and `apply()` idempotent.**
    - Writers use `write_if_changed()` or atomic `replace_dir()`. Running `fontlab apply` twice must report `"already applied"` on the second run.

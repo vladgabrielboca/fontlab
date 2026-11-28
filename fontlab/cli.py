@@ -28,7 +28,7 @@ EPILOG = """examples:
   fontlab doctor                   check this system
 """
 
-ERRORS = (StateError, fonts.FontError, PackageError, DownloadError, toolchain.ToolError, FileNotFoundError)
+ERRORS = (StateError, desktop.DesktopError, fonts.FontError, PackageError, DownloadError, toolchain.ToolError, FileNotFoundError)
 
 
 def print_report(report: Report) -> None:
@@ -122,8 +122,10 @@ def cmd_fonts(args) -> None:
         for p in PACKAGES:
             m = p.manifest()
             outdated = bool(m and p.changed_inputs(m))
-            mark = "!" if outdated else "✓" if m else " "
+            old = bool(m and p.old_build(m))
+            mark = "!" if outdated or old else "✓" if m else " "
             detail = (f"{m.version}, system copy changed: fontlab fonts install {p.id}" if outdated
+                      else f"{m.version}, built by an older fontlab: fontlab fonts install {p.id}" if old
                       else m.version if m else p.unavailable() or "not installed")
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
@@ -168,7 +170,7 @@ def cmd_apps(args) -> None:
         apps.save_choices(choices)
         print_report(apply(statefile.load()))
         return
-    active = chromium.needs_launcher(statefile.load())
+    active = chromium.needs_launcher(Context.detect().effective(statefile.load())[0])
     found = [a for a in apps.scan() if a.reason]
     for a in sorted(found, key=lambda a: a.entry.name.lower()):
         mark = "-" if a.skipped else "✓" if active else " "
@@ -200,6 +202,9 @@ def cmd_doctor(_args) -> None:
     if chromium.needs_launcher(st):
         line(ctx.shim and apps.wrapped_count() > 0,
              f"{apps.wrapped_count()} app launcher entries start through fontlab (fontlab apps)")
+        for a in apps.shim_unverified(apps.scan()):
+            line(False, f"{a.entry.name}: no Chromium files (icudtl.dat) found for {a.entry.program}, "
+                        "so the shim may not load in it (contrast, gamma, private fonts)")
     if st["session_shim"] == "on":
         active = chromium.session_shim_active()
         line(active, "session-wide shim active in this login"
@@ -207,6 +212,8 @@ def cmd_doctor(_args) -> None:
     for p in PACKAGES:
         if p.installed and p.changed_inputs():
             line(False, f"font package {p.id}: system copy changed, rebuild with: fontlab fonts install {p.id}")
+        elif p.old_build():
+            line(False, f"font package {p.id}: built by an older fontlab, rebuild with: fontlab fonts install {p.id}")
         else:
             line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(st),

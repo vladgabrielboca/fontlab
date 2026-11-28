@@ -241,7 +241,9 @@ class Detector:
             self.dirty = True
         return self.cache[key]
 
-    def check(self, p: Path, depth: int = 0) -> str | None:
+    def check(self, p: Path, depth: int = 0, packages: bool = True) -> str | None:
+        """Why p is Chromium-based. packages=False counts only Chromium files found on
+        disk, which is what the shim itself looks for (icudtl.dat next to the program)."""
         if chromium_dir(p.parent):
             return f"Chromium files in {p.parent}"
         if is_appimage(p):
@@ -249,13 +251,13 @@ class Detector:
         if head(p, 2) == b"#!" and depth < 3 and p.stat().st_size < 256_000:
             for target in EXEC_RE.findall(p.read_text(errors="replace")):
                 r = resolve(target[1])
-                if r and r != p and (why := self.check(r, depth + 1)):
+                if r and r != p and (why := self.check(r, depth + 1, packages)):
                     return why
         for d in (Path("/usr/lib"), Path("/usr/lib64"), Path("/opt")):
             for name in (p.name, p.name + "-bin"):
                 if chromium_dir(d / name):
                     return f"Chromium files in {d / name}"
-        return package_reason(p)
+        return package_reason(p) if packages else None
 
     @staticmethod
     def check_appimage(p: Path, timeout: float = 5.0) -> str | None:
@@ -380,6 +382,22 @@ def scan() -> list[App]:
         apps.append(App(e, reason, skipped=matches(e, choices["skip"])))
     detector.save()
     return apps
+
+
+def shim_unverified(found: list[App]) -> list[App]:
+    """Wrapped apps where no Chromium files were found on disk (detected by package or
+    fontlab apps add). The shim loads only next to icudtl.dat, so these may get LD_PRELOAD
+    and nothing else. KNOWN apps are trusted: Discord's launcher starts the real binary
+    from ~/.config/discord."""
+    detector, out = Detector(), []
+    for a in found:
+        if not a.wrapped or a.via_wrapper or a.entry.program and Path(a.entry.program).name in KNOWN \
+                or (a.reason or "").startswith(("Chromium files", "Electron")):
+            continue
+        p = resolve(a.entry.program) if a.entry.program else None
+        if p is None or (not is_appimage(p) and detector.check(p, packages=False) is None):
+            out.append(a)
+    return out
 
 
 # --- apply --------------------------------------------------------------------------

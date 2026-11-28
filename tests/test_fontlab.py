@@ -550,6 +550,16 @@ class AppsTest(TempHome):
         self.assertEqual((paths.P.applications_dir / "mine.desktop").read_text(), self.user_entry)
         self.assertFalse((paths.P.desktop_backup / "mine.desktop").exists())
 
+    def test_apps_without_chromium_files_are_reported(self) -> None:
+        from unittest import mock
+        apps.save_choices({"add": ["editor"], "skip": []})
+        bare = self.home / "bin/editor"
+        self.fake_font(bare, "ELF")
+        real = self.home / "opt/electronapp/electronapp"
+        with mock.patch.object(apps, "resolve", lambda prog: bare if "editor" in prog else real):
+            names = [a.entry.id for a in apps.shim_unverified(apps.scan())]
+        self.assertEqual(names, ["editor.desktop"])
+
     def test_entry_reaching_a_wrapper_is_left_alone(self) -> None:
         from unittest import mock
         self.desktop(self.system / "applications/browser.desktop", "browser %U")
@@ -731,6 +741,67 @@ class AppImageProbeTest(TempHome):
             self.fake_font(mount / n)
         p = self.script(f'echo "{mount}"; sleep 30')
         self.assertEqual(apps.Detector.check_appimage(p, timeout=5), "Electron AppImage")
+
+
+class AuditFixesTest(TempHome):
+    def test_old_build_asks_for_a_rebuild(self) -> None:
+        self.fake_package("roboto", {"450": ["Roboto-Regular.ttf"]})     # manifest without "build"
+        self.assertTrue(BY_ID["roboto"].old_build())
+        self.assertIn("fontlab fonts install roboto", packages.outdated_notices()[0])
+        f = paths.P.sources / "roboto/manifest.json"
+        f.write_text(json.dumps(json.loads(f.read_text()) | {"build": BY_ID["roboto"].BUILD}))
+        self.assertFalse(BY_ID["roboto"].old_build())
+        self.assertEqual(packages.outdated_notices(), [])
+        self.fake_package("inter", {"450": ["Inter-Regular.ttf"]})       # BUILD 0: never asks
+        self.assertFalse(BY_ID["inter"].old_build())
+
+    def test_old_build_keeps_its_files(self) -> None:
+        self.fake_package("roboto", {"450": ["Roboto-Regular.ttf"]})
+        rob = next(fs for fs in fonts.plan(dict(DEFAULTS, ui_weight="450")) if fs.family.id == "roboto")
+        self.assertTrue(rob.sources)
+
+    def test_prune_drops_tmp_dirs_and_does_not_count_them(self) -> None:
+        b = paths.P.builds_dir
+        for i in range(fonts.KEEP_BUILDS):
+            (b / f"x-{i}").mkdir(parents=True)
+        for i in range(3):
+            (b / f"y-{i}.tmp").mkdir()
+        fonts._prune_builds()
+        names = sorted(d.name for d in b.iterdir())
+        self.assertEqual(len(names), fonts.KEEP_BUILDS)
+        self.assertFalse(any(n.endswith(".tmp") for n in names))
+
+    def test_gsettings_failure_is_a_desktop_error(self) -> None:
+        from unittest import mock
+        done = subprocess.CompletedProcess([], 1, "", "dconf is read-only")
+        with mock.patch.object(desktop, "gsettings_available", return_value=True), \
+                mock.patch.object(desktop.subprocess, "run", return_value=done):
+            with self.assertRaises(desktop.DesktopError):
+                desktop.apply_gsettings(DEFAULTS)
+
+
+class BrowserTest(unittest.TestCase):
+    def pick(self, in_usr_bin: set[str], which: dict[str, str], real: bool):
+        from unittest import mock
+        with mock.patch.object(Path, "exists", lambda p: str(p).startswith("/usr/bin/") and p.name in in_usr_bin), \
+                mock.patch.object(chromium.shutil, "which", lambda a: which.get(a)), \
+                mock.patch.object(chromium.apps, "is_fontlab_wrapper",
+                                  lambda p: str(p).startswith("/usr/local/bin")):
+            return chromium.browser(real=real)
+
+    def test_dangling_chromium_wrapper_is_skipped(self) -> None:
+        which = {"chromium": "/usr/local/bin/chromium", "brave-origin": "/usr/local/bin/brave-origin"}
+        self.assertEqual(self.pick({"brave-origin"}, which, real=True), "/usr/bin/brave-origin")
+        self.assertEqual(self.pick({"brave-origin"}, which, real=False), "/usr/local/bin/brave-origin")
+
+    def test_browser_outside_usr_bin(self) -> None:
+        which = {"chromium": "/usr/local/bin/chromium", "vivaldi-stable": "/opt/bin/vivaldi-stable"}
+        self.assertEqual(self.pick(set(), which, real=True), "/opt/bin/vivaldi-stable")
+        self.assertIsNone(self.pick(set(), {"chromium": "/usr/local/bin/chromium"}, real=True))
+
+    def test_apps_are_not_preview_browsers(self) -> None:
+        self.assertNotIn("spotify", chromium.BROWSERS)
+        self.assertNotIn("discord", chromium.BROWSERS)
 
 
 if __name__ == "__main__":

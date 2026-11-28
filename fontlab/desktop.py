@@ -16,6 +16,12 @@ from . import paths
 from .state import State
 
 SCHEMA = "org.gnome.desktop.interface"
+
+
+class DesktopError(RuntimeError):
+    pass
+
+
 FREETYPE = {      # "keep" is not here: fontlab then never touches /etc/environment
     "off": None,
     "cff": "cff:no-stem-darkening=0",
@@ -71,7 +77,10 @@ def apply_gsettings(state: State) -> bool:
         current = subprocess.run(["gsettings", "get", SCHEMA, key],
                                  capture_output=True, text=True).stdout.strip().strip("'")
         if current != value:
-            subprocess.run(["gsettings", "set", SCHEMA, key, value], check=True)
+            r = subprocess.run(["gsettings", "set", SCHEMA, key, value], capture_output=True, text=True)
+            if r.returncode:
+                raise DesktopError(f"gsettings set {SCHEMA} {key} {value} failed: "
+                                   + (r.stderr.strip() or f"exit {r.returncode}"))
             changed = True
     return changed
 

@@ -17,7 +17,7 @@ Use this procedure whenever you compare visual or pixel-level rendering changes 
 
 ### Headless Chromium (Fontations)
 
-- Invoke `/usr/bin/chromium`, never bare `chromium` (which runs `/usr/local/bin/chromium` and pulls in the user's live `chromium-text.conf` and `chromium-fonts.conf`).
+- Invoke the real browser binary, never a bare name like `chromium` (which runs fontlab's `/usr/local/bin` wrapper and pulls in the user's live `chromium-text.conf` and `chromium-fonts.conf`). Get it with `python3 -c 'from fontlab import chromium; print(chromium.browser(real=True))'` from the repo root (on this machine `/usr/bin/brave-origin`; `/usr/bin/chromium` is not installed).
 - Set `TMPDIR=/tmp` and `XDG_RUNTIME_DIR=/tmp`. Longer temp paths crash Chromium with `FATAL: process_singleton_posix.cc: Socket path too long`.
 - Mirror `fontlab.preview.compare_setup()` in your temp dir:
   - Build or symlink only the font files needed for the test into `<tmp>/fonts/<family>/`.
