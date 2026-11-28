@@ -4,7 +4,9 @@ fontlab lets you change how fonts look on Linux from one screen. Pick a value wi
 arrow keys and it applies right away. You can test hinting, antialiasing, font weight,
 stem darkening and Chromium's text gamma until text looks clear on your monitor.
 
-![fontlab screen](docs/screenshot.png)
+![fontlab Settings tab](docs/screenshot-settings.png)
+
+![fontlab Fonts tab](docs/screenshot-fonts.png)
 
 I built it on Omarchy (Arch Linux with Hyprland). It only needs Python and fontconfig,
 so it should work on other distros too.
