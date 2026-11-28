@@ -1,5 +1,5 @@
-"""The interactive screen: every setting in one list, applied as you change it, and the
-font packages below them.
+"""The interactive screen. Two tabs: Settings (applied as you change them) and Fonts
+(the font packages to install, update or remove). Tab switches.
 
 Changes are saved to state.toml at once. A background worker applies them after a
 short pause (so holding an arrow key does not rebuild fonts for every step), restarts
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import desktop, paths, state as statefile
 from .apply import apply
-from .availability import Context
+from .availability import Context, needs, unlocks
 from .packages import PACKAGES, Package
 from .preview import Preview
 from .settings import SETTINGS, Setting
@@ -28,10 +28,12 @@ from .state import State, StateError
 
 LOGO = ("█▀▀ █▀█ █▄ █ ▀█▀ █   ▄▀█ █▄▄",
         "█▀  █▄█ █ ▀█  █  █▄▄ █▀█ █▄█")
-KEYS = "↑↓ move  ←→ change  enter pick/install  r default  b restart shell  x remove  p preview  c compare  s save  o open  ! sudo  q quit"
-FONTS_GROUP = "Install fonts"
+TABS = ("Settings", "Fonts")
+GLOBAL_KEYS = "tab switch tab  p preview  c compare preset  s save preset  o open preset  b restart shell  ! sudo  q quit"
 DEBOUNCE = 0.35
 LABEL_W = 26
+HELP_LINES = 3          # wrapped help text shown for the selected row
+FOOTER = HELP_LINES + 7  # help, affects/unlocks, lock reason, status, 2 notices, message, keys
 
 
 class Worker(threading.Thread):
@@ -118,15 +120,18 @@ class Screen:
         self.scr = stdscr
         self.state = statefile.load()
         self.ctx = Context.detect()
-        self.rows: list[Setting | Package | str] = []      # str = group heading
+        settings: list[Setting | Package | str] = []      # str = group heading
         for s in SETTINGS:
-            if s.group not in self.rows:
-                self.rows.append(s.group)
-            self.rows.append(s)
-        self.rows.append(FONTS_GROUP)
-        self.rows += PACKAGES
-        self.cursor = next(i for i, r in enumerate(self.rows) if not isinstance(r, str))
-        self.top = 0
+            if s.group not in settings:
+                settings.append(s.group)
+            settings.append(s)
+        packages: list[Setting | Package | str] = ["Main fonts", *(p for p in PACKAGES if not p.optional),
+                                                   "Optional", *(p for p in PACKAGES if p.optional)]
+        self.tabs = (settings, packages)
+        self.tab = 0
+        self.cursors = [1, 1]                  # row 0 of each tab is a heading
+        self.tops = [0, 0]
+        self.locks: dict[str, str | None] = {}
         self.message = ""
         self.preview = Preview()
         self.compare = Preview("compare")     # a saved preset, not applied
@@ -149,19 +154,40 @@ class Screen:
             self.scr.addnstr(y, x, text, w - x - 1, attr)
 
     @property
+    def rows(self) -> list[Setting | Package | str]:
+        return self.tabs[self.tab]
+
+    @property
+    def cursor(self) -> int:
+        return self.cursors[self.tab]
+
+    @cursor.setter
+    def cursor(self, i: int) -> None:
+        self.cursors[self.tab] = i
+
+    @property
     def row(self) -> Setting | Package:
         r = self.rows[self.cursor]
         assert not isinstance(r, str)
         return r
 
+    def lock(self, s: Setting) -> str | None:
+        """Why s cannot be changed now, pointing at the Fonts tab when a package would help."""
+        reason = self.locks.get(s.key)
+        if reason and self.ctx.setting_blocker(s) and not set(needs(s)) & {"shim", "vencord"}:
+            reason += " (Tab: Fonts)"
+        return reason
+
     def draw_setting(self, y: int, s: Setting, selected: bool) -> None:
-        blocked = self.ctx.setting_blocker(s)
+        locked = self.lock(s)
         value = self.state[s.key]
-        label_attr = (self.ACCENT | curses.A_BOLD) if selected else (curses.A_DIM if blocked else 0)
+        label_attr = (self.ACCENT | curses.A_BOLD) if selected else (curses.A_DIM if locked else 0)
         self.put(y, 2, ("▸ " if selected else "  ") + s.label, label_attr)
         x = 4 + LABEL_W
-        if blocked:
-            self.put(y, x, f"  {blocked}", curses.A_DIM)
+        if locked:
+            self.put(y, x, f"  {value}", curses.A_DIM)
+            note = "locked" if value == s.default else f"locked, using {s.default}"
+            self.put(y, x + len(value) + 4, note, self.WARN | curses.A_DIM)
             return
         usable = self.ctx.choices(s)
         i = usable.index(value) if value in usable else -1
@@ -177,33 +203,71 @@ class Screen:
         x = 4 + LABEL_W
         m = self.ctx.manifests.get(p.id)
         if m:
-            self.put(y, x, "✓ installed", self.OK | curses.A_BOLD)
-            self.put(y, x + 13, m.version, curses.A_DIM)
+            self.put(y, x, "✓ " + m.version, self.OK)
+        elif blocker := p.unavailable():
+            self.put(y, x, "  " + blocker, curses.A_DIM)
         else:
-            blocker = p.unavailable()
-            self.put(y, x, f"  {blocker}" if blocker else "  not installed, enter installs", curses.A_DIM)
+            self.put(y, x, "  not installed", curses.A_DIM)
+
+    def draw_help(self, y: int, width: int) -> None:
+        """The selected row explained: help text, what it affects or unlocks, and its lock."""
+        r = self.row
+        warn = None
+        if isinstance(r, Setting):
+            text, extra, warn = r.help, f"Affects: {r.affects}.", self.lock(r)
+        else:
+            text, got = r.summary, unlocks(r)
+            extra = f"Unlocks: {', '.join(got)}." if got else "Works by itself, no setting to change."
+        lines = textwrap.wrap(text, width)
+        if len(lines) > HELP_LINES:
+            lines = lines[:HELP_LINES]
+            lines[-1] = lines[-1][:width - 1] + "…"
+        for i, line in enumerate(lines):
+            self.put(y + i, 2, line)
+        self.put(y + HELP_LINES, 2, extra, curses.A_DIM)
+        if warn:
+            self.put(y + HELP_LINES + 1, 2, f"Locked: {warn}", self.WARN)
+
+    def draw_tabs(self, y: int) -> None:
+        x = 2
+        for i, name in enumerate(TABS):
+            attr = (self.ACCENT | curses.A_BOLD | curses.A_REVERSE) if i == self.tab else curses.A_DIM
+            self.put(y, x, f" {name} ", attr)
+            x += len(name) + 3
+
+    def keys(self) -> str:
+        r = self.row
+        if isinstance(r, Package):
+            return "↑↓ move  enter " + ("update/remove  x remove" if r.installed else "install")
+        if self.lock(r):
+            return "↑↓ move  r default"
+        return "↑↓ move  ←→ change  enter pick  r default"
 
     def draw(self) -> None:
         self.scr.erase()
         h, w = self.scr.getmaxyx()
+        self.locks = self.ctx.locks(self.state)
         y = 1
         for line in LOGO:
             self.put(y, 2, line, self.LOGO | curses.A_BOLD)
             y += 1
         self.put(y - 1, 2 + len(LOGO[0]) + 3, "font rendering, one place", curses.A_DIM)
         y += 1
+        self.draw_tabs(y)
+        y += 2
 
-        footer = 6
-        list_h = max(3, h - y - footer)
-        if self.cursor < self.top:
-            self.top = self.cursor
-        if self.cursor >= self.top + list_h:
-            self.top = self.cursor - list_h + 1
-        if self.top > 0 and isinstance(self.rows[self.top - 1], str) and self.cursor - self.top + 1 < list_h:
-            self.top -= 1           # keep a group heading visible above its first row
+        list_h = max(3, h - y - FOOTER)
+        top = self.tops[self.tab]
+        if self.cursor < top:
+            top = self.cursor
+        if self.cursor >= top + list_h:
+            top = self.cursor - list_h + 1
+        if top > 0 and isinstance(self.rows[top - 1], str) and self.cursor - top + 1 < list_h:
+            top -= 1                # keep a group heading visible above its first row
+        self.tops[self.tab] = top
 
-        for i, row in enumerate(self.rows[self.top:self.top + list_h]):
-            selected = self.top + i == self.cursor
+        for i, row in enumerate(self.rows[top:top + list_h]):
+            selected = top + i == self.cursor
             if isinstance(row, str):
                 self.put(y + i, 2, row.upper(), curses.A_DIM | curses.A_BOLD)
             elif isinstance(row, Setting):
@@ -211,25 +275,25 @@ class Screen:
             else:
                 self.draw_package(y + i, row, selected)
 
-        y = h - footer
-        r = self.row
-        self.put(y, 2, r.help if isinstance(r, Setting) else r.summary, curses.A_DIM)
+        y = h - FOOTER
+        self.put(y, 2, "─" * max(0, w - 4), curses.A_DIM)
+        self.draw_help(y + 1, max(20, w - 4))
+        y += HELP_LINES + 3
         wk = self.worker
         if wk.error:
-            self.put(y + 1, 2, wk.error, self.ERR)
+            self.put(y, 2, wk.error, self.ERR)
         else:
-            self.put(y + 1, 2, ("◌ " if wk.busy else "● ") + wk.status, self.WARN if wk.busy else self.OK)
+            self.put(y, 2, ("◌ " if wk.busy else "● ") + wk.status, self.WARN if wk.busy else self.OK)
         if wk.preview_on and not wk.busy and not self.preview.running:
             wk.preview_on = False             # the window was closed by hand
         preview = "preview: on" if wk.preview_on else "preview: off"
         if self.compare.running:
             preview += f", vs {self.compare_name}"
-        self.put(y + 1, max(2, w - len(preview) - 2), preview, self.ACCENT if wk.preview_on else curses.A_DIM)
+        self.put(y, max(2, w - len(preview) - 2), preview, self.ACCENT if wk.preview_on else curses.A_DIM)
         for j, notice in enumerate(wk.notices[:2]):
-            self.put(y + 2 + j, 2, "! " + notice, self.WARN)
-        if self.message:
-            self.put(h - 2, 2, self.message, self.ACCENT)
-        self.put(h - 1, 2, KEYS, curses.A_DIM)
+            self.put(y + 1 + j, 2, "! " + notice, self.WARN)
+        self.put(h - 2, 2, self.message or self.keys(), self.ACCENT if self.message else curses.A_DIM)
+        self.put(h - 1, 2, GLOBAL_KEYS, curses.A_DIM)
         self.scr.refresh()
 
     # --- popups -----------------------------------------------------------------
@@ -332,8 +396,8 @@ class Screen:
         self.worker.request(self.state)
 
     def step(self, s: Setting, delta: int) -> None:
-        if self.ctx.setting_blocker(s):
-            self.message = self.ctx.setting_blocker(s)
+        if reason := self.lock(s):
+            self.message = f"{s.label} is locked: {reason}"
             return
         usable = self.ctx.choices(s)
         value = self.state[s.key]
@@ -477,7 +541,9 @@ class Screen:
     def handle(self, k: int) -> bool:
         """Returns False to quit."""
         r = self.row
-        if k in (curses.KEY_UP, ord("k")):
+        if k in (9, curses.KEY_BTAB):
+            self.tab = 1 - self.tab
+        elif k in (curses.KEY_UP, ord("k")):
             self.move(-1)
         elif k in (curses.KEY_DOWN, ord("j")):
             self.move(1)
@@ -485,8 +551,8 @@ class Screen:
             self.step(r, -1 if k in (curses.KEY_LEFT, ord("h")) else 1)
         elif k in (curses.KEY_ENTER, 10, 13):
             if isinstance(r, Setting):
-                if blocked := self.ctx.setting_blocker(r):
-                    self.message = blocked
+                if reason := self.lock(r):
+                    self.message = f"{r.label} is locked: {reason}"
                 elif value := self.pick(r.label, self.ctx.choices(r), self.state[r.key]):
                     self.set_value(r, value)
             elif not r.installed:

@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import paths, vencord
-from .packages import BY_ID, Manifest, unlocking
+from .packages import BY_ID, Manifest, Package, unlocking
 from .settings import BY_KEY, SETTINGS, WEB_FONTS, Setting
 from .state import State
 
@@ -95,6 +95,16 @@ class Context:
                 out[s.key] = s.default
         return out, notices
 
+    def locks(self, state: State) -> dict[str, str | None]:
+        """For every setting: why the TUI and CLI should not offer it right now, or None."""
+        effective = self.effective(state)[0]
+        return {s.key: self.setting_blocker(s) or lock_reason(s, effective) for s in SETTINGS}
+
     def locked(self, state: State, s: Setting) -> str | None:
-        """Why the TUI and CLI should not offer this setting right now, or None."""
-        return self.setting_blocker(s) or lock_reason(s, self.effective(state)[0])
+        return self.locks(state)[s.key]
+
+
+def unlocks(package: Package) -> list[str]:
+    """What installing a package makes available, for the Fonts tab."""
+    out = [s.label for s in SETTINGS if package in unlocking(s.key)]
+    return out + [f"web font {c}" for c, w in WEB_FONTS.items() if w.package == package.id]
