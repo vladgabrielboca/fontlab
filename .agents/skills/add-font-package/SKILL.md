@@ -22,7 +22,7 @@ Update every layer below so CLI, TUI, `apply()`, `preview.compare_setup()`, `ava
    - Override `install_sources()` when it is not a plain download (imported from a folder with `ask=True`, detected folders). The TUI and CLI only render that list.
    - These attributes are the only place package-to-setting links live: `availability.needs()`, `unlocking()`, `unlocks()` (Fonts tab) and `fonts.families()` derive from them.
    - Pin downloads with SHA-256 hashes via `download.fetch(..., sha256)`.
-   - `build()` only fetches stock files: the family into `400/` (leave it out when the system font is the 400 base), variable fonts into `variable/` (list them in `VARIABLE`). Return `Manifest(version)`.
+   - `build()` only fetches stock files: the family into `400/` (leave it out when the system font is the 400 base), variable fonts into `variable/` (list them in `VARIABLE`). Return the version string for `manifest.json`.
    - Override `replaces()` to list the system font paths it stands in for, from `find_fonts()` (which excludes `paths.P.installed_fonts`), so `70-fontlab-render.conf` hides them with `<rejectfont>`. It runs at every apply.
    - Append to `PACKAGES` (which builds `BY_ID`). `Package.install()` marks staged files `0o444` and swaps atomically via `replace_dir()`.
 

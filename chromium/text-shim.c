@@ -9,7 +9,9 @@
 //    terminal, editor or helper the app starts keeps the desktop's own fontconfig.
 // Safe to load session-wide via LD_PRELOAD: non-Chromium processes exit shim_init() after
 // a single access() check and hit a one-branch fast path in every hooked call. All real_*
-// symbols are resolved eagerly at load time so forked children never call dlsym().
+// symbols are resolved in shim_init() so forked children never call dlsym(). REAL() still
+// resolves one on first use, because constructors of the program's own libraries run
+// before shim_init() and may spawn or exec (fork() comes later, when all are set).
 //  - with LCD_FILTER=box, swaps Skia's subpixel (LCD) filter table for a 1-pixel box, in
 //    memory, in every Chromium process (see patch_lcd_filter), and stays in LD_PRELOAD so
 //    zygote, GPU and utility processes load it too.
@@ -41,6 +43,9 @@ static int (*real_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_ac
 typedef int (*main_fn)(int, char **, char **);
 typedef int (*start_fn)(main_fn, int, char **, void (*)(void), void (*)(void), void (*)(void), void *);
 static start_fn real_start;
+#define REAL(name) ({ \
+  if (!real_##name) real_##name = (__typeof__(real_##name))dlsym(RTLD_NEXT, #name); \
+  real_##name; })
 static char extra[2][64];
 static int have_extra = 0;
 static int is_chromium = 0;
@@ -217,25 +222,25 @@ __attribute__((constructor)) static void shim_init(void) {
 // Only the browser process itself (no --type=) of a BROWSER_EXES binary, and only once.
 int __libc_start_main(main_fn main, int argc, char **argv, void (*init)(void), void (*fini)(void),
                       void (*rtld_fini)(void), void *stack_end) {
-  start_fn real = real_start ? real_start : (start_fn)dlsym(RTLD_NEXT, "__libc_start_main");
-  if (!real) _exit(127);
+  if (!real_start) real_start = (start_fn)dlsym(RTLD_NEXT, "__libc_start_main");
+  if (!real_start) _exit(127);
   if (!is_browser || !have_extra || !argv || argc < 1)
-    return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+    return real_start(main, argc, argv, init, fini, rtld_fini, stack_end);
   int at = argc;   // before a "--", after which Chromium reads no switches
   for (int i = 1; i < argc; i++) {
     if (!strncmp(argv[i], "--type=", 7) || !strncmp(argv[i], "--text-contrast", 15))
-      return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+      return real_start(main, argc, argv, init, fini, rtld_fini, stack_end);
     if (!strcmp(argv[i], "--") && at == argc) at = i;
   }
   char **out = malloc(sizeof *out * (size_t)(argc + 3));
-  if (!out) return real(main, argc, argv, init, fini, rtld_fini, stack_end);
+  if (!out) return real_start(main, argc, argv, init, fini, rtld_fini, stack_end);
   int n = 0;
   for (int i = 0; i < at; i++) out[n++] = argv[i];
   out[n++] = extra[0];
   out[n++] = extra[1];
   for (int i = at; i < argc; i++) out[n++] = argv[i];
   out[n] = NULL;
-  return real(main, n, out, init, fini, rtld_fini, stack_end);
+  return real_start(main, n, out, init, fini, rtld_fini, stack_end);
 }
 
 static size_t pad4(size_t n) { return (n + 3) & ~(size_t)3; }
@@ -259,29 +264,28 @@ static size_t put_str(uint8_t *o, const char *s) {
 }
 
 ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
-  if (!real_sendmsg) real_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
   if (!is_chromium || !have_extra || !m || m->msg_iovlen != 1 || m->msg_iov[0].iov_len < 32)
-    return real_sendmsg(fd, m, flags);
+    return REAL(sendmsg)(fd, m, flags);
   const uint8_t *b = m->msg_iov[0].iov_base;
   size_t len = m->msg_iov[0].iov_len;
   uint32_t payload; memcpy(&payload, b, 4);
-  if ((size_t)payload + 4 != len) return real_sendmsg(fd, m, flags);
+  if ((size_t)payload + 4 != len) return REAL(sendmsg)(fd, m, flags);
   const char *pt; int32_t ptlen;
   size_t off = skip_str(b, len, 8, &pt, &ptlen);  // after header + cmd
-  if (!off || ptlen != 8 || memcmp(pt, "renderer", 8)) return real_sendmsg(fd, m, flags);
-  if (off + 4 > len) return real_sendmsg(fd, m, flags);
+  if (!off || ptlen != 8 || memcmp(pt, "renderer", 8)) return REAL(sendmsg)(fd, m, flags);
+  if (off + 4 > len) return REAL(sendmsg)(fd, m, flags);
   int32_t argc; memcpy(&argc, b + off, 4);
-  if (argc < 1 || argc > 4096) return real_sendmsg(fd, m, flags);
+  if (argc < 1 || argc > 4096) return REAL(sendmsg)(fd, m, flags);
   size_t argc_off = off, p = off + 4;
   for (int32_t i = 0; i < argc; i++) {
     const char *s; int32_t n;
     p = skip_str(b, len, p, &s, &n);
-    if (!p) return real_sendmsg(fd, m, flags);
-    if (n > 15 && !memcmp(s, "--text-contrast", 15)) return real_sendmsg(fd, m, flags);
+    if (!p) return REAL(sendmsg)(fd, m, flags);
+    if (n > 15 && !memcmp(s, "--text-contrast", 15)) return REAL(sendmsg)(fd, m, flags);
   }
   size_t add = 4 + pad4(strlen(extra[0])) + 4 + pad4(strlen(extra[1]));
   uint8_t *o = malloc(len + add);
-  if (!o) return real_sendmsg(fd, m, flags);
+  if (!o) return REAL(sendmsg)(fd, m, flags);
   memcpy(o, b, p);
   size_t q = p;
   q += put_str(o + q, extra[0]);
@@ -291,7 +295,7 @@ ssize_t sendmsg(int fd, const struct msghdr *m, int flags) {
   int32_t nargc = argc + 2; memcpy(o + argc_off, &nargc, 4);
   struct iovec iov = { o, len + add };
   struct msghdr mm = *m; mm.msg_iov = &iov; mm.msg_iovlen = 1;
-  ssize_t r = real_sendmsg(fd, &mm, flags);
+  ssize_t r = REAL(sendmsg)(fd, &mm, flags);
   free(o);
   if (r == (ssize_t)(len + add)) return (ssize_t)len;
   return r < 0 ? r : -1;
@@ -340,9 +344,6 @@ static char *const *child_env(char *const envp[], char *out[]) {
   return dropped ? out : envp;
 }
 
-#define ENSURE(name) \
-  if (!real_##name) real_##name = (__typeof__(name) *)dlsym(RTLD_NEXT, #name)
-
 static char *const *child_argv(char *const argv[], char *out[]) {
   if (!needs_flags(argv)) return argv;
   with_flags(argv, out);
@@ -350,43 +351,37 @@ static char *const *child_argv(char *const argv[], char *out[]) {
 }
 
 int execve(const char *path, char *const argv[], char *const envp[]) {
-  ENSURE(execve);
   char *a[MAX_ARGS], *e[MAX_ENV];
-  return real_execve(path, child_argv(argv, a), child_env(envp, e));
+  return REAL(execve)(path, child_argv(argv, a), child_env(envp, e));
 }
 
 int execv(const char *path, char *const argv[]) {
-  ENSURE(execv); ENSURE(execve);
   char *a[MAX_ARGS], *e[MAX_ENV];
   char *const *env = child_env(environ, e);
-  if (env != environ) return real_execve(path, child_argv(argv, a), env);
-  return real_execv(path, child_argv(argv, a));
+  if (env != environ) return REAL(execve)(path, child_argv(argv, a), env);
+  return REAL(execv)(path, child_argv(argv, a));
 }
 
 int execvp(const char *file, char *const argv[]) {
-  ENSURE(execvp); ENSURE(execvpe);
   char *a[MAX_ARGS], *e[MAX_ENV];
   char *const *env = child_env(environ, e);
-  if (env != environ && real_execvpe) return real_execvpe(file, child_argv(argv, a), env);
-  return real_execvp(file, child_argv(argv, a));
+  if (env != environ && REAL(execvpe)) return REAL(execvpe)(file, child_argv(argv, a), env);
+  return REAL(execvp)(file, child_argv(argv, a));
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
-  ENSURE(execvpe);
   char *a[MAX_ARGS], *e[MAX_ENV];
-  return real_execvpe(file, child_argv(argv, a), child_env(envp, e));
+  return REAL(execvpe)(file, child_argv(argv, a), child_env(envp, e));
 }
 
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa,
                 const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
-  ENSURE(posix_spawn);
   char *a[MAX_ARGS], *e[MAX_ENV];
-  return real_posix_spawn(pid, path, fa, at, child_argv(argv, a), child_env(envp, e));
+  return REAL(posix_spawn)(pid, path, fa, at, child_argv(argv, a), child_env(envp, e));
 }
 
 int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *fa,
                  const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
-  ENSURE(posix_spawnp);
   char *a[MAX_ARGS], *e[MAX_ENV];
-  return real_posix_spawnp(pid, file, fa, at, child_argv(argv, a), child_env(envp, e));
+  return REAL(posix_spawnp)(pid, file, fa, at, child_argv(argv, a), child_env(envp, e));
 }

@@ -44,8 +44,8 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     conf_changed |= write_if_changed(paths.P.web_conf, web) if web else remove(paths.P.web_conf)
     if conf_changed:
         report.changed.append("fontconfig")
-    if fonts_changed or conf_changed:
-        progress("fc-cache")
+    if fonts_changed:
+        progress("fc-cache")     # caches are per font file; conf rules are read live
         fc_cache()
     if fonts_changed and desktop.shell_restart_available():
         report.notices.append(desktop.SHELL_NOTICE)
@@ -93,7 +93,7 @@ def uninstall(purge: bool = False) -> list[str]:
         removed.append(str(p.installed_fonts))
     desktop.reset_gsettings()
     if purge:
-        for d in (p.sources, p.cache_dir, p.config_dir, p.home / ".local/share/fontlab/venv"):
+        for d in (p.sources, p.cache_dir, p.config_dir, p.venv):
             if d.exists():
                 shutil.rmtree(d)
                 removed.append(str(d))

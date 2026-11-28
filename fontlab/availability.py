@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import paths, vencord
-from .packages import BY_ID, Manifest, Package, unlocking
+from .packages import BY_ID, Package, unlocking
 from .settings import BY_KEY, SETTINGS, WEB_FONTS, Setting
 from .state import State
 
@@ -38,7 +38,7 @@ def lock_reason(s: Setting, state: State) -> str | None:
 
 @dataclass(frozen=True)
 class Context:
-    manifests: dict[str, Manifest]
+    manifests: dict[str, str]     # installed package id -> version
     shim: bool
     vencord: bool = False
 
@@ -95,9 +95,6 @@ class Context:
         """For every setting: why the TUI and CLI should not offer it right now, or None."""
         effective = self.effective(state)[0]
         return {s.key: self.setting_blocker(s) or lock_reason(s, effective) for s in SETTINGS}
-
-    def locked(self, state: State, s: Setting) -> str | None:
-        return self.locks(state)[s.key]
 
 
 def unlocks(package: Package) -> list[str]:

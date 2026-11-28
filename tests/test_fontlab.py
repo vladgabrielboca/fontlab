@@ -5,19 +5,18 @@ stands in for builders/run.py)."""
 from __future__ import annotations
 
 import json
-import tempfile
-import unittest
-from pathlib import Path
-
 import os
 import shutil
 import subprocess
+import tempfile
+import unittest
+from pathlib import Path
 from unittest import mock
 
 from fontlab import chromium, desktop, fontconfig, fonts, packages, paths, vencord
 from fontlab import state as statefile
 from fontlab.availability import Context
-from fontlab.packages import BY_ID, Manifest, WindowsFonts
+from fontlab.packages import BY_ID, WindowsFonts
 from fontlab.settings import BY_KEY, DEFAULTS, SETTINGS
 
 
@@ -41,6 +40,8 @@ class TempHome(unittest.TestCase):
         jobs = [json.loads(line) for line in (stdin or "").splitlines()]
         for j in jobs:
             text = f"{int(j['wght'])} {Path(j['src']).name}" if j.get("variable") else Path(j["src"]).read_text()
+            if j.get("instance_out"):
+                Path(j["instance_out"]).write_text(text)
             Path(j["out"]).write_text(("dark " if j.get("darken") else "") + text)
         self.builds.append(jobs)
 
@@ -152,12 +153,12 @@ class AvailabilityTest(TempHome):
     def test_locked_setting_keeps_its_value_but_applies_the_default(self) -> None:
         ctx = Context.detect()
         st = dict(DEFAULTS, lcdfilter="legacy")                       # grayscale: does nothing
-        self.assertIn("Antialiasing", ctx.locked(st, BY_KEY["lcdfilter"]))
+        self.assertIn("Antialiasing", ctx.locks(st)["lcdfilter"])
         effective, notices = ctx.effective(st)
         self.assertEqual((effective["lcdfilter"], notices), ("light", []))
         self.assertEqual(st["lcdfilter"], "legacy")                    # the state keeps it
         rgb = dict(st, antialias="rgb")
-        self.assertIsNone(ctx.locked(rgb, BY_KEY["lcdfilter"]))
+        self.assertIsNone(ctx.locks(rgb)["lcdfilter"])
         self.assertEqual(ctx.effective(rgb)[0]["lcdfilter"], "legacy")
 
     def test_vencord_needs_a_client(self) -> None:
@@ -179,7 +180,7 @@ class AvailabilityTest(TempHome):
         f = paths.P.sources / "inter/manifest.json"
         f.write_text(json.dumps({"version": "4.1", "weights": ["400", "450"], "replaces": [], "build": 0,
                                  "inputs": {}}))
-        self.assertEqual(BY_ID["inter"].manifest().version, "4.1")
+        self.assertEqual(BY_ID["inter"].manifest(), "4.1")
 
 
 class FontsTest(TempHome):
@@ -208,7 +209,7 @@ class FontsTest(TempHome):
         self.assertEqual(sorted(jobs), ["Inter-Bold.ttf", "Inter-Italic.ttf", "Inter-Regular.ttf",
                                         "JetBrainsMonoNerdFont-Italic.ttf", "JetBrainsMonoNerdFont-Regular.ttf"])
         self.assertEqual(jobs["JetBrainsMonoNerdFont-Regular.ttf"]["method"], "graft")
-        self.assertIsNone(jobs["JetBrainsMonoNerdFont-Regular.ttf"]["darken"])   # jbm is never darkened
+        self.assertIsNone(jobs["JetBrainsMonoNerdFont-Regular.ttf"].get("darken"))   # jbm is never darkened
         self.assertEqual(self.installed("inter/Inter-Bold.ttf").read_text(), "dark 400 Inter-Bold.ttf")
         self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "dark 450 Inter-Regular.ttf")
 
@@ -219,6 +220,18 @@ class FontsTest(TempHome):
         fonts.install(st)                                   # back to 450: cached, nothing built
         self.assertEqual(len(self.builds), 1)
         self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "450 Inter-Regular.ttf")
+
+    def test_darkening_change_only_darkens(self) -> None:
+        """The face instanced at a weight is cached before darkening, under its own key."""
+        st = dict(DEFAULTS, ui_weight="450", darkening="0.25")
+        fonts.install(st)
+        fonts.install(dict(st, darkening="0.50"))
+        self.assertEqual(len(self.builds), 2)
+        regular = {Path(j["out"]).name: j for j in self.builds[1]}["Inter-Regular.ttf"]
+        self.assertNotIn("variable", regular)               # instanced once, darkened twice
+        self.assertEqual(Path(regular["src"]).read_text(), "450 Inter-Regular.ttf")
+        self.assertEqual(self.installed("inter/Inter-Regular.ttf").read_text(), "dark 450 Inter-Regular.ttf")
+        self.assertEqual(len([d for d in paths.P.builds_dir.iterdir() if d.name.startswith("inter-i-")]), 2)
 
     def test_missing_package_installs_nothing(self) -> None:
         fonts.install(dict(DEFAULTS))
@@ -279,7 +292,7 @@ class FontsTest(TempHome):
         gs = next(fs for fs in sets if fs.family.id == "googlesans")
         self.assertEqual(gs.darken, 0.0)
         self.assertEqual([p.parent.name for p in gs.sources], ["400"])
-        self.assertTrue(fonts.installed(sets, "googlesans"))
+        self.assertFalse(gs.empty)
         self.assertEqual(next(fs for fs in sets if fs.family.id == "inter").darken, 0.5)
 
     def test_reinstalled_package_is_reinstalled(self) -> None:
@@ -301,8 +314,8 @@ class PackagesTest(TempHome):
         folder = self.home / "Fonts"
         for n in ("arial.ttf", "segoeui.ttf", "notes.txt"):
             self.fake_font(folder / n)
-        manifest = WindowsFonts().install(lambda _m: None, folder)
-        self.assertIsInstance(manifest, Manifest)
+        version = WindowsFonts().install(lambda _m: None, folder)
+        self.assertEqual(version, f"imported from {folder}")
         files = sorted(p.name for p in paths.P.windows_fonts.iterdir())
         self.assertEqual(files, ["arial.ttf", "segoeui.ttf"])
         self.assertEqual((paths.P.windows_fonts / "arial.ttf").stat().st_mode & 0o222, 0)
@@ -357,10 +370,31 @@ class FontconfigTest(TempHome):
         finally:
             paths.SYSTEM_FONTCONFIG_DIR = old
 
+    def test_system_rewrites_see_an_edit_behind_a_symlink(self) -> None:
+        """conf.d holds symlinks: editing the target leaves the folder's mtime alone."""
+        confd, avail = self.home / "conf.d", self.home / "conf.avail"
+        confd.mkdir()
+        avail.mkdir()
+        rule = """<fontconfig><match target="pattern">
+          <test name="family" qual="any"><string>sans-serif</string></test>
+          <edit name="family" mode="assign" binding="strong"><string>{}</string></edit>
+        </match></fontconfig>"""
+        target = avail / "50-distro.conf"
+        target.write_text(rule.format("Liberation Sans"))
+        (confd / "50-distro.conf").symlink_to(target)
+        old = paths.SYSTEM_FONTCONFIG_DIR
+        paths.SYSTEM_FONTCONFIG_DIR = confd
+        try:
+            self.assertEqual(fontconfig.system_sans_rewrites(), ["Liberation Sans"])
+            target.write_text(rule.format("Noto Sans"))
+            os.utime(target, ns=(1, 1))
+            self.assertEqual(fontconfig.system_sans_rewrites(), ["Noto Sans"])
+        finally:
+            paths.SYSTEM_FONTCONFIG_DIR = old
+
 
 class ChromiumTest(TempHome):
     def ui_font(self, family: str | None):
-        from unittest import mock
         return mock.patch.object(chromium, "gtk_ui_family", return_value=family)
 
     def test_system_ui_follows_web_fonts(self) -> None:
@@ -474,7 +508,6 @@ class ChromiumApplyTest(TempHome):
 
 class CompareTest(TempHome):
     def test_preset_window_uses_its_own_files(self) -> None:
-        from unittest import mock
         from fontlab import preview
         self.fake_package("inter", ["Inter-Regular.ttf", "Inter-Bold.ttf"])
         self.fake_font(paths.P.shim)
@@ -502,7 +535,6 @@ class CompareTest(TempHome):
         self.assertEqual(env["LD_PRELOAD"], str(paths.P.shim))
 
     def test_default_text_values_skip_the_shim(self) -> None:
-        from unittest import mock
         from fontlab import preview
         with mock.patch.object(preview.subprocess, "run"), \
                 mock.patch.dict(os.environ, {"LD_PRELOAD": "x.so", "FONTLAB_TEXT_CONF": "y"}):
@@ -513,7 +545,6 @@ class CompareTest(TempHome):
 
 class ShellNoticeTest(TempHome):
     def test_font_change_asks_for_a_shell_restart(self) -> None:
-        from unittest import mock
         from fontlab import apply as applymod
         self.fake_jbm_system()
         self.fake_package("jbm")
@@ -661,8 +692,11 @@ class ShimEnvironmentTest(TempHome):
             (app / n).write_text("")
         script = ('printf "%s|" "${FONTCONFIG_FILE-unset}"; '
                   'env | grep -c "^FONTCONFIG_FILE=" || true')
-        run = lambda **e: subprocess.run([str(app / "app"), "-c", script], env=self.env(LD_PRELOAD=str(so), **e),
-                                         capture_output=True, text=True).stdout.strip()
+        def run(**extra: str) -> str:
+            r = subprocess.run([str(app / "app"), "-c", script], env=self.env(LD_PRELOAD=str(so), **extra),
+                               capture_output=True, text=True)
+            return r.stdout.strip()
+
         self.assertEqual(run(), f"{self.conf}|0")                    # app has it, child does not
         self.assertEqual(run(FONTCONFIG_FILE="/mine.conf"), "/mine.conf|1")   # user's own value stays
 
@@ -706,18 +740,44 @@ class AuditFixesTest(TempHome):
         self.assertEqual(len(names), fonts.KEEP_BUILDS)
         self.assertFalse(any(n.endswith(".tmp") for n in names))
 
+    def test_prune_counts_instanced_faces_apart(self) -> None:
+        b = paths.P.builds_dir
+        for i in range(fonts.KEEP_BUILDS):
+            (b / f"inter-{i}").mkdir(parents=True)
+        for i in range(fonts.KEEP_BUILDS + 4):
+            (b / f"inter-i-{i}").mkdir()
+        fonts._prune_builds()
+        names = [d.name for d in b.iterdir()]
+        self.assertEqual(len([n for n in names if "-i-" not in n]), fonts.KEEP_BUILDS)
+        self.assertEqual(len([n for n in names if "-i-" in n]), fonts.KEEP_BUILDS)
+
+    def test_gsettings_skips_a_missing_key_and_sets_the_rest(self) -> None:
+        calls = []
+        def run(cmd, **_kw):
+            calls.append(cmd[1:4])
+            if cmd[1] == "get":
+                ok = cmd[3] != "font-antialiasing"              # this key is not in the schema
+                return subprocess.CompletedProcess(cmd, 0 if ok else 1, "'none'\n" if ok else "", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        with mock.patch.object(desktop.shutil, "which", return_value="/usr/bin/gsettings"), \
+                mock.patch.object(desktop.subprocess, "run", side_effect=run):
+            self.assertTrue(desktop.apply_gsettings(dict(DEFAULTS, hinting="slight")))
+        self.assertIn(["set", desktop.SCHEMA, "font-hinting"], calls)
+        self.assertNotIn(["set", desktop.SCHEMA, "font-antialiasing"], calls)
+
     def test_gsettings_failure_is_a_desktop_error(self) -> None:
-        from unittest import mock
-        done = subprocess.CompletedProcess([], 1, "", "dconf is read-only")
-        with mock.patch.object(desktop, "gsettings_available", return_value=True), \
-                mock.patch.object(desktop.subprocess, "run", return_value=done):
+        def run(cmd, **_kw):
+            if cmd[1] == "get":
+                return subprocess.CompletedProcess(cmd, 0, "'rgba'\n", "")
+            return subprocess.CompletedProcess(cmd, 1, "", "dconf is read-only")
+        with mock.patch.object(desktop.shutil, "which", return_value="/usr/bin/gsettings"), \
+                mock.patch.object(desktop.subprocess, "run", side_effect=run):
             with self.assertRaises(desktop.DesktopError):
                 desktop.apply_gsettings(DEFAULTS)
 
 
 class BrowserTest(unittest.TestCase):
     def pick(self, in_usr_bin: set[str], which: dict[str, str]):
-        from unittest import mock
         with mock.patch.object(Path, "exists", lambda p: str(p).startswith("/usr/bin/") and p.name in in_usr_bin), \
                 mock.patch.object(chromium.shutil, "which", lambda a: which.get(a)):
             return chromium.browser()

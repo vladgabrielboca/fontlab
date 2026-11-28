@@ -26,7 +26,7 @@ EPILOG = """examples:
   fontlab doctor                   check this system
 """
 
-ERRORS = (StateError, desktop.DesktopError, fonts.FontError, PackageError, DownloadError, toolchain.ToolError, FileNotFoundError)
+ERRORS = (StateError, desktop.DesktopError, PackageError, DownloadError, toolchain.ToolError, FileNotFoundError)
 
 
 def print_report(report: Report) -> None:
@@ -39,6 +39,7 @@ def print_report(report: Report) -> None:
 
 def cmd_status(_args) -> None:
     st, ctx = statefile.load(), Context.detect()
+    locks = ctx.locks(st)
     group = None
     for s in SETTINGS:
         if s.group != group:
@@ -46,7 +47,7 @@ def cmd_status(_args) -> None:
             print(f"\n{group}")
         if reason := ctx.blocker(s.key, st[s.key]):
             note = f"   (unavailable: {reason})"
-        elif (reason := ctx.locked(st, s)) and st[s.key] != s.default:
+        elif (reason := locks[s.key]) and st[s.key] != s.default:
             note = f"   (locked, using {s.default}: {reason})"
         elif reason:
             note = f"   (locked: {reason})"
@@ -87,8 +88,9 @@ def cmd_set(args) -> None:
             raise StateError(f"{key}={value}: {reason}. See: fontlab fonts")
         st[key] = value
     statefile.save(st)
+    locks = ctx.locks(st)
     for key in dict.fromkeys(pair.partition("=")[0] for pair in args.pairs):
-        if (reason := ctx.locked(st, BY_KEY[key])) and st[key] != BY_KEY[key].default:
+        if (reason := locks[key]) and st[key] != BY_KEY[key].default:
             print(f"{key} saved but locked ({reason}): using {BY_KEY[key].default} until then")
     print_report(apply(st, system=args.system))
 
@@ -120,7 +122,7 @@ def cmd_fonts(args) -> None:
         for p in PACKAGES:
             m = p.manifest()
             mark = "✓" if m else " "
-            detail = m.version if m else p.unavailable() or "not installed"
+            detail = m or p.unavailable() or "not installed"
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
             print(f"   {'':<10} {p.summary}")
@@ -145,9 +147,9 @@ def cmd_fonts(args) -> None:
         if not ready:
             raise StateError(f"{pkg.name}: give the folder with --from DIR")
         folder = ready[0].folder
-    manifest = pkg.install(lambda msg: print(f"  {msg}", end="\r" if "%" in msg else "\n", flush=True),
-                           folder)
-    print(f"\ninstalled {pkg.name} ({manifest.version})")
+    version = pkg.install(lambda msg: print(f"  {msg}", end="\r" if "%" in msg else "\n", flush=True),
+                          folder)
+    print(f"\ninstalled {pkg.name} ({version})")
     print_report(apply(statefile.load()))
 
 

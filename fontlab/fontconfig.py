@@ -9,9 +9,11 @@
 
 from __future__ import annotations
 
+import functools
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from html import escape
+from pathlib import Path
 
 from . import paths
 from .settings import WEB_FONTS
@@ -110,9 +112,25 @@ def system_sans_rewrites() -> list[str]:
     """Families the system config ASSIGNS in place of sans-serif/system-ui.
 
     Some distros (Omarchy's 50-omarchy.conf) replace the generic name before user rules
-    run, so a rule on "sans-serif" never fires. Matching on what it became fixes that."""
+    run, so a rule on "sans-serif" never fires. Matching on what it became fixes that.
+    Cached on each file's path and mtime: conf.d holds symlinks, and stat() follows them, so
+    an edit of the file a link points to is seen too."""
+    d = paths.SYSTEM_FONTCONFIG_DIR
+    if not d.is_dir():
+        return []
+    stamps = []
+    for f in sorted(d.glob("*.conf")):
+        try:
+            stamps.append((f, f.stat().st_mtime_ns))
+        except OSError:      # a dangling symlink
+            continue
+    return _rewrites(tuple(stamps))
+
+
+@functools.cache
+def _rewrites(stamps: tuple[tuple[Path, int], ...]) -> list[str]:
     found: list[str] = []
-    for f in sorted(paths.SYSTEM_FONTCONFIG_DIR.glob("*.conf")):
+    for f, _ in stamps:
         try:
             root = ET.parse(f).getroot()
         except (ET.ParseError, OSError):

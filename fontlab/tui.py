@@ -119,7 +119,7 @@ class Screen:
     def __init__(self, stdscr: curses.window) -> None:
         self.scr = stdscr
         self.state = statefile.load()
-        self.ctx = Context.detect()
+        self.refresh_ctx()
         settings: list[Setting | Package | str] = []      # str = group heading
         for s in SETTINGS:
             if s.group not in settings:
@@ -203,8 +203,8 @@ class Screen:
         x = 4 + LABEL_W
         m = self.ctx.manifests.get(p.id)
         if m:
-            self.put(y, x, "✓ " + m.version, self.OK)
-        elif blocker := p.unavailable():
+            self.put(y, x, "✓ " + m, self.OK)
+        elif blocker := self.blockers[p.id]:
             self.put(y, x, "  " + blocker, curses.A_DIM)
         else:
             self.put(y, x, "  not installed", curses.A_DIM)
@@ -406,7 +406,10 @@ class Screen:
 
     # --- packages ---------------------------------------------------------------
     def refresh_ctx(self) -> None:
+        """Installed packages, and why each other one cannot be installed (it walks the font
+        folders, so it is not done per frame)."""
         self.ctx = Context.detect()
+        self.blockers = {p.id: p.unavailable() for p in PACKAGES}
 
     def install(self, p: Package) -> None:
         sources = p.install_sources()

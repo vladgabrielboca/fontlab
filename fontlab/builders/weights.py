@@ -30,7 +30,9 @@ def instance(vf_path, loc):
     vf = TTFont(vf_path)
     keep = is_hinted(vf) and ("cvar" in vf or all(
         loc.get(a.axisTag, a.defaultValue) == a.defaultValue for a in vf["fvar"].axes))
-    f = instantiateVariableFont(vf, loc)
+    # In place: vf is loaded here and dropped. The default deep copy of the whole font
+    # is a quarter of the time, and the result is the same font.
+    f = instantiateVariableFont(vf, loc, inplace=True)
     if is_hinted(f) and not keep:
         drop_hinting(f)
     return f
@@ -43,7 +45,7 @@ def at_weight(base, variable, method, axes, wght):
         _take_identity(f, TTFont(base))
         return f
     if method == "graft":
-        donor = instantiateVariableFont(TTFont(variable), {**axes, "wght": wght})
+        donor = instantiateVariableFont(TTFont(variable), {**axes, "wght": wght}, inplace=True)
         f = TTFont(base)
         bg, dg = f["glyf"], donor["glyf"]
         for name in donor.getGlyphOrder():

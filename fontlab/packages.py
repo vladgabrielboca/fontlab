@@ -14,33 +14,24 @@ leaves the previous one untouched.
 
 from __future__ import annotations
 
+import fnmatch
 import glob
 import json
 import shutil
 import tempfile
 import zipfile
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths
 from .download import fetch
 from .fsutil import replace_dir
-from .toolchain import Progress, ToolError
+from .toolchain import Progress
 SYSTEM_FONT_DIRS = (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))
 
 
 class PackageError(RuntimeError):
     pass
-
-
-@dataclass
-class Manifest:
-    version: str
-
-    @classmethod
-    def from_json(cls, data: dict) -> Manifest:
-        """Keys from older layouts (weights, replaces, inputs, build) are ignored."""
-        return cls(**{f.name: data[f.name] for f in fields(cls) if f.name in data})
 
 
 @dataclass(frozen=True)
@@ -69,13 +60,15 @@ def font_dirs() -> list[Path]:
     return [*SYSTEM_FONT_DIRS, home / ".local/share/fonts", home / ".fonts"]
 
 
-def find_fonts(pattern: str) -> list[Path]:
-    """Font files matching a glob pattern in any font folder, fontlab's output excluded."""
+def find_fonts(*patterns: str) -> list[Path]:
+    """Font files matching any of the glob patterns in any font folder, fontlab's output
+    excluded. One walk for all patterns: each walk scans every font folder."""
     own = paths.P.installed_fonts
     found = []
     for d in font_dirs():
         if d.is_dir():
-            found += [p for p in d.rglob(pattern) if p.is_file() and own not in p.parents]
+            found += [p for p in d.rglob("*") if p.is_file() and own not in p.parents
+                      and any(fnmatch.fnmatch(p.name, pat) for pat in patterns)]
     return sorted(found)
 
 
@@ -119,11 +112,10 @@ class Package:
     def root(self) -> Path:
         return paths.P.sources / self.id
 
-    def manifest(self) -> Manifest | None:
+    def manifest(self) -> str | None:
+        """The installed version, or None. Keys from older layouts in the file are ignored."""
         f = self.root / "manifest.json"
-        if not f.exists():
-            return None
-        return Manifest.from_json(json.loads(f.read_text()))
+        return json.loads(f.read_text())["version"] if f.exists() else None
 
     @property
     def installed(self) -> bool:
@@ -146,10 +138,11 @@ class Package:
         """Why this package cannot be installed here, or None."""
         return None
 
-    def build(self, stage: Path, work: Path, progress: Progress, folder: Path | None) -> Manifest:
+    def build(self, stage: Path, work: Path, progress: Progress, folder: Path | None) -> str:
+        """Fills stage/ and returns the version string for manifest.json."""
         raise NotImplementedError
 
-    def install(self, progress: Progress, folder: Path | None = None) -> Manifest:
+    def install(self, progress: Progress, folder: Path | None = None) -> str:
         reason = self.blocker(folder)
         if reason:
             raise PackageError(f"{self.name}: {reason}")
@@ -160,16 +153,16 @@ class Package:
         paths.P.cache_dir.mkdir(parents=True, exist_ok=True)
         try:
             with tempfile.TemporaryDirectory(dir=paths.P.cache_dir, prefix=f"{self.id}-") as work:
-                manifest = self.build(stage, Path(work), progress, folder)
+                version = self.build(stage, Path(work), progress, folder)
         except BaseException:
             shutil.rmtree(stage, ignore_errors=True)
             raise
-        (stage / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2) + "\n")
+        (stage / "manifest.json").write_text(json.dumps({"version": version}, indent=2) + "\n")
         for f in stage.rglob("*"):
             if f.is_file():
                 f.chmod(0o444)      # installs hard-link these files; nothing may write into them
         replace_dir(stage, self.root)
-        return manifest
+        return version
 
     def remove(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
@@ -193,7 +186,7 @@ class Inter(Package):
         for v in self.VARIABLE:
             shutil.copy2(release / v, stage / "variable" / v)
         shutil.copy2(release / "LICENSE.txt", stage / "LICENSE.txt")
-        return Manifest(self.VERSION)
+        return self.VERSION
 
     def weight_faces(self):
         var, opsz = self.root / "variable", (("opsz", 14.0),)
@@ -202,8 +195,7 @@ class Inter(Package):
         return [f for f in faces if f.base.exists() and f.variable.exists()]
 
     def replaces(self):
-        return [str(p) for pat in ("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")
-                for p in find_fonts(pat)]
+        return [str(p) for p in find_fonts("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")]
 
 
 class JetBrainsMono(Package):
@@ -234,7 +226,7 @@ class JetBrainsMono(Package):
             shutil.copy2(release / "fonts/variable" / v, stage / "variable" / v)
         if (release / "OFL.txt").exists():
             shutil.copy2(release / "OFL.txt", stage / "OFL.txt")
-        return Manifest(self.VERSION)
+        return self.VERSION
 
     def weight_faces(self):
         """Grafted onto the installed copy, read when settings are applied: a system
@@ -267,7 +259,7 @@ class GoogleSansFlex(Package):
         (stage / "400").mkdir()
         fetch(self.URL, stage / "400" / self.FONT, progress, self.SHA256)
         fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
-        return Manifest("5.000 " + self.COMMIT[:7])
+        return "5.000 " + self.COMMIT[:7]
 
 
 class WindowsFonts(Package):
@@ -301,7 +293,7 @@ class WindowsFonts(Package):
         for f in folder.iterdir():
             if f.is_file() and f.suffix.lower() in (".ttf", ".ttc", ".otf"):
                 shutil.copy2(f, stage / "fonts" / f.name)
-        return Manifest(f"imported from {folder}")
+        return f"imported from {folder}"
 
 
 PACKAGES: tuple[Package, ...] = (Inter(), JetBrainsMono(), GoogleSansFlex(), WindowsFonts())
@@ -311,7 +303,3 @@ BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 def unlocking(key: str) -> list[Package]:
     """Packages that give a setting something to act on (weights, darkening)."""
     return [p for p in PACKAGES if p.weight_key == key or (key == "darkening" and p.darkens)]
-
-
-__all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "Source", "ToolError", "WeightFace",
-           "unlocking"]

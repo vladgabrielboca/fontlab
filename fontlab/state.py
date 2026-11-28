@@ -111,7 +111,7 @@ def load_preset(name: str) -> State:
 
 
 def delete_preset(name: str) -> None:
-    preset_path(name).unlink(missing_ok=False)
+    preset_path(name).unlink()
 
 
 def list_presets() -> list[str]:

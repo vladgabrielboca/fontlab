@@ -22,10 +22,9 @@ class ToolError(RuntimeError):
 
 
 def _venv_python() -> str:
-    venv = paths.P.home / ".local/share/fontlab/venv"
-    py = venv / "bin/python"
+    py = paths.P.venv / "bin/python"
     if not py.exists():
-        r = subprocess.run([sys.executable, "-m", "venv", str(venv)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-m", "venv", str(paths.P.venv)], capture_output=True, text=True)
         if r.returncode != 0:
             raise ToolError("fontTools is missing and a venv could not be created "
                             f"({r.stderr.strip()}). Install python-fonttools or uv.")

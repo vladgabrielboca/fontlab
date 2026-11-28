@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-import urllib.parse
-import urllib.request
 from pathlib import Path
+from urllib.parse import unquote
 
 from .toolchain import Progress
 
@@ -17,7 +16,9 @@ class DownloadError(RuntimeError):
 
 
 def fetch(url: str, dest: Path, progress: Progress, sha256: str | None = None) -> Path:
-    name = urllib.parse.unquote(url.rsplit("/", 1)[-1])
+    import urllib.request  # only while downloading; it is a fifth of fontlab's start-up otherwise
+
+    name = unquote(url.rsplit("/", 1)[-1])
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     digest = hashlib.sha256()
     try:

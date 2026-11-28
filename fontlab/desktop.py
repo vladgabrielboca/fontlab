@@ -68,14 +68,21 @@ def gsettings_available() -> bool:
     return r.returncode == 0 and "font-hinting" in r.stdout
 
 
+def gsettings_get(key: str) -> str | None:
+    """A key's value, or None when gsettings or the schema is missing."""
+    if not shutil.which("gsettings"):
+        return None
+    r = subprocess.run(["gsettings", "get", SCHEMA, key], capture_output=True, text=True)
+    return r.stdout.strip().strip("'") if r.returncode == 0 else None
+
+
 def apply_gsettings(state: State) -> bool:
     """No-op on systems without GNOME's interface schema."""
-    if not gsettings_available():
-        return False
     changed = False
     for key, value in gsettings_values(state).items():
-        current = subprocess.run(["gsettings", "get", SCHEMA, key],
-                                 capture_output=True, text=True).stdout.strip().strip("'")
+        current = gsettings_get(key)
+        if current is None:     # gsettings or this key is missing here
+            continue
         if current != value:
             r = subprocess.run(["gsettings", "set", SCHEMA, key, value], capture_output=True, text=True)
             if r.returncode:

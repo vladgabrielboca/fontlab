@@ -87,6 +87,12 @@ class Paths:
     def shim(self) -> Path:
         return self.runtime_dir / "fontlab-text-shim.so"
 
+    @property
+    def venv(self) -> Path:
+        """Private Python with fontTools for the builders, made when the system Python has
+        none and there is no uv (toolchain.py)."""
+        return self.home / ".local/share/fontlab/venv"
+
     # --- cache --------------------------------------------------------------
     @property
     def cache_dir(self) -> Path:

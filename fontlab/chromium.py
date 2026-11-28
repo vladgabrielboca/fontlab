@@ -55,17 +55,11 @@ def browser() -> str | None:
     return None
 
 
-def lcd_box(state: State) -> bool:
-    """Whether the shim swaps Skia's LCD filter. With grayscale text the setting is
-    locked to stock before it gets here (Setting.active_when)."""
-    return state["chromium_lcd_filter"] == "box"
-
-
 def text_conf(state: State) -> str | None:
     """None when contrast, gamma and the LCD filter are Chromium's own: nothing to add.
     LCD_FILTER=box also keeps the shim in LD_PRELOAD for Chromium's child processes,
     which patch the filter table in their own memory (chromium/text-shim.c)."""
-    box = lcd_box(state)
+    box = state["chromium_lcd_filter"] == "box"
     if (state["contrast"] == BY_KEY["contrast"].default and state["gamma"] == BY_KEY["gamma"].default
             and not box):
         return None
@@ -74,11 +68,8 @@ def text_conf(state: State) -> str | None:
 
 def gtk_ui_family() -> str | None:
     """Family of the GTK UI font: gsettings font-name "Adwaita Sans 11" -> "Adwaita Sans"."""
-    if not desktop.gsettings_available():
-        return None
-    out = subprocess.run(["gsettings", "get", desktop.SCHEMA, "font-name"],
-                         capture_output=True, text=True).stdout.strip().strip("'")
-    return re.sub(r"\s+[\d.]+$", "", out) or None
+    name = desktop.gsettings_get("font-name") or ""
+    return re.sub(r"\s+[\d.]+$", "", name) or None
 
 
 def system_ui_rule(state: State) -> str:
@@ -248,9 +239,9 @@ def sync_systemd_session_env(enabled: bool) -> bool:
 
 
 def _compositor_has_shim() -> bool:
-    """Check whether the running graphical compositor (e.g. Hyprland) inherited LD_PRELOAD,
-    so fontlab doctor still works accurately even when run inside a Chromium-based terminal
-    where the shim already stripped itself from LD_PRELOAD."""
+    """Whether the running Hyprland inherited the shim in LD_PRELOAD. A shell started from
+    a Chromium-based app (T3 Code, a VS Code terminal) has lost it from its own LD_PRELOAD,
+    since the shim drops itself there, so its environment alone says nothing."""
     if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
         return False
     r = subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", "Hyprland"],
