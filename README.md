@@ -25,7 +25,6 @@ You need Python 3.11 or newer and fontconfig. These are optional:
 
 - `gcc` builds the small library fontlab loads into Chromium and Electron apps. It sets their text contrast, gamma, subpixel filter and hinting, and their private font config (fontlab's font aliases and `system-ui` font). Without it, the Chromium settings are greyed out.
 - `uv` or `python-fonttools` builds the heavier font weights. If you have neither, fontlab sets up its own copy the first time.
-- `7z` lets fontlab download SF Pro from Apple. Without it, you can still add SF Pro from a folder.
 
 Log out and back in after the first install, so every app you start gets the Chromium
 settings (see [Chromium and Electron apps](#chromium-and-electron-apps)).
@@ -82,11 +81,10 @@ a new terminal window for terminal fonts.
 | mono_hinting | the same, for monospace fonts in your terminal and editor |
 | lcdfilter | colour filter for subpixel text. Chromium ignores it |
 | small_bold | fake bold for text smaller than 14 pixels, made by fontconfig. GTK apps use it; Chromium and Qt ignore it |
-| darkening | makes Inter, Adwaita Sans, Roboto and Ubuntu Sans thicker the way macOS does it, from 0 to 1 |
-| ui_weight | weight of Inter, Adwaita Sans, Roboto and Ubuntu Sans, from 400 (normal) to 500 |
-| mono_weight | weight of JetBrains Mono and Ubuntu Sans Mono |
-| sf_weight | weight of SF Pro Text |
-| web_fonts | the font web pages get when they ask for `sans-serif` or Arial: system, inter, ubuntu, sf or windows |
+| darkening | makes Inter thicker the way macOS does it, from 0 to 1 |
+| ui_weight | weight of Inter, from 400 (normal) to 500 |
+| mono_weight | weight of JetBrains Mono |
+| web_fonts | the font web pages get when they ask for `sans-serif` or Arial: system, inter or windows |
 | vencord_fonts | `on` (default) makes Vesktop and other Vencord clients use your `sans-serif` and `monospace` instead of Discord's own font, gg sans, so the settings above reach Discord. `off` removes it. Restart the client after changing it |
 | contrast, gamma | text contrast and gamma in every Chromium and Electron app. Higher gamma makes light text on dark backgrounds heavier. The defaults, 0.2 and 1.2, are Chromium's own values |
 | chromium_lcd_filter | `box` swaps Skia's subpixel filter in Chromium and Electron apps for a 1-pixel filter like Windows ClearType, so subpixel text is sharper. Works only with `antialias` `rgb` or `bgr`. The shim patches the filter in each app's memory at start, and stays loaded in the app's child processes; restart the app. `stock` (default) leaves it alone |
@@ -109,17 +107,12 @@ The repo has no font files in it. fontlab downloads or builds each one on your c
 | font | where it comes from |
 |---|---|
 | Inter | downloaded from github.com/rsms/inter |
-| Adwaita Sans | built from the copy your system already has |
 | JetBrains Mono | downloaded, then built on top of your installed JetBrains Mono or its Nerd Font version, so the icons still work |
 | Google Sans Flex | downloaded from github.com/google/fonts, optional. Kept at its stock weight with no darkening, so it matches the web font Google sometimes sends. Google's pages ask for "Google Sans" by name but don't always load it, so without a local copy the same search titles switch between Inter and Google's font. fontlab points "Google Sans", "Google Sans Text" and "Google Sans Display" at it |
-| Roboto | downloaded from github.com/google/fonts, optional. Built as static faces with heavier weights and darkening. When installed, fontlab stops aliasing Roboto to Inter/SF so sites like YouTube keep Roboto (pair with blocking `fonts.gstatic.com/s/roboto/*` in your ad blocker so the local darkened copy is used) |
-| Ubuntu Sans | downloaded from github.com/canonical/Ubuntu-Sans-fonts, optional. Ubuntu's UI font since 24.04, built as static faces with heavier weights and darkening. Pick it with `web_fonts=ubuntu` |
-| Ubuntu Sans Mono | downloaded from github.com/canonical/Ubuntu-Sans-Mono-fonts, optional. Follows `mono_weight`. Make it your terminal font with `omarchy font set "Ubuntu Sans Mono"` |
-| SF Pro | downloaded from Apple, or added from a folder |
 | Windows 11 fonts | copied from a Windows Fonts folder. fontlab looks for mounted Windows drives. Only Chromium apps use them |
 
-Apple's license only allows SF Pro on Apple devices. The Windows fonts need a Windows
-license. fontlab asks you to accept that before it installs either one.
+The Windows fonts need a Windows license. fontlab asks you to accept that before it
+installs them.
 
 ## What it changes
 

@@ -25,7 +25,7 @@ from . import paths
 from .download import fetch
 from .fsutil import replace_dir
 from .settings import WEIGHTS as ALL_WEIGHTS
-from .toolchain import Progress, ToolError, run, run_builder, seven_zip
+from .toolchain import Progress, ToolError, run_builder
 
 WEIGHTS = ALL_WEIGHTS[1:]        # built on top of the stock 400
 SYSTEM_FONT_DIRS = (Path("/usr/share/fonts"), Path("/usr/local/share/fonts"))
@@ -42,7 +42,7 @@ class Manifest:
     replaces: list[str] = field(default_factory=list)   # system files hidden while installed
     # System files the build read, with fingerprint(): a package update changes them.
     inputs: dict[str, str] = field(default_factory=dict)
-    build: int = 0      # Package.BUILD when it was installed
+    build: int = 0      # unused since 2026-11-28; old manifests still carry it
 
 
 def fingerprint(path: Path) -> str:
@@ -99,9 +99,6 @@ class Package:
     weight_key: str | None = None       # setting that picks the weight; None = always 400
     darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
     system_base: bool = False           # weight 400 is the system font itself: install nothing
-    # Bump when a builder change alters this package's files, so existing installs are told
-    # to reinstall. 1: hinting dropped from instances away from the default master.
-    BUILD: int = 0
     built_on_system: bool = False       # built from installed system files (Manifest.inputs)
 
     def install_sources(self) -> list[Source]:
@@ -143,11 +140,6 @@ class Package:
             return []
         return [f for f in manifest.replaces if Path(f).exists() and Path(f).stat().st_ctime > built + 1]
 
-    def old_build(self, manifest: Manifest | None = None) -> bool:
-        """Installed by a fontlab whose builder made different files. They still work."""
-        manifest = manifest or self.manifest()
-        return manifest is not None and manifest.build < self.BUILD
-
     def blocker(self, folder: Path | None = None) -> str | None:
         """Why this package cannot be installed here, or None."""
         return None
@@ -170,7 +162,6 @@ class Package:
         except BaseException:
             shutil.rmtree(stage, ignore_errors=True)
             raise
-        manifest.build = self.BUILD
         (stage / "manifest.json").write_text(json.dumps(asdict(manifest), indent=2) + "\n")
         for f in stage.rglob("*"):
             if f.is_file():
@@ -201,30 +192,6 @@ class Inter(Package):
         replaces = [str(p) for pat in ("Inter-*.[ot]tf", "InterVariable*.ttf", "Inter.ttc", "Inter.var.ttf")
                     for p in find_fonts(pat)]
         return Manifest(self.VERSION, ["400", *WEIGHTS], replaces)
-
-
-class AdwaitaSans(Package):
-    id, name = "adwaita", "Adwaita Sans"
-    weight_key, darkens, built_on_system = "ui_weight", True, True
-
-    def install_sources(self):
-        return [Source("Build from the installed copy")]
-    summary = "GNOME's UI font (GTK, Chromium tabs), rebuilt as static files with heavier weights."
-
-    def system_files(self) -> tuple[Path, Path] | None:
-        regular = find_fonts("AdwaitaSans-Regular.ttf")
-        regular = [p for p in regular if (p.parent / "AdwaitaSans-Italic.ttf").exists()]
-        return (regular[0], regular[0].parent / "AdwaitaSans-Italic.ttf") if regular else None
-
-    def blocker(self, folder=None):
-        return None if self.system_files() else "Adwaita Sans is not installed on this system"
-
-    def build(self, stage, work, progress, folder):
-        regular, italic = self.system_files()
-        progress("building Adwaita Sans static family")
-        run_builder(["adwaita", str(regular.parent), str(stage), *WEIGHTS])
-        return Manifest(f"from {regular.parent}", ["400", *WEIGHTS], [str(regular), str(italic)],
-                        fingerprints([regular, italic]))
 
 
 class JetBrainsMono(Package):
@@ -283,131 +250,6 @@ class GoogleSansFlex(Package):
         return Manifest("5.000 " + self.COMMIT[:7])
 
 
-class Roboto(Package):
-    id, name = "roboto", "Roboto"
-    weight_key, darkens = "ui_weight", True
-    summary = ("Darkened local Roboto with heavier weights. Keeps Roboto on sites like YouTube "
-               "(when remote Roboto webfonts are blocked) instead of aliasing it to Inter.")
-    optional, BUILD = True, 1
-    VERSION = "3.015"
-    COMMIT = "1c627bfa375fc51cf86fabeca4f6e08a95f0aa5c"
-    BASE = f"https://raw.githubusercontent.com/google/fonts/{COMMIT}/ofl/roboto"
-    REG_URL = f"{BASE}/Roboto%5Bwdth%2Cwght%5D.ttf"
-    REG_SHA256 = "d7598e12c5dbef095ff8272cfc55da0250bd07fbdecbac8a530b9b277872a134"
-    ITAL_URL = f"{BASE}/Roboto-Italic%5Bwdth%2Cwght%5D.ttf"
-    ITAL_SHA256 = "9725a847af6b460ffca162ae66d20dad48b01876137947180b42d7dcd7887182"
-    OFL_URL = f"{BASE}/OFL.txt"
-    OFL_SHA256 = "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41"
-
-    def build(self, stage, work, progress, folder):
-        reg = fetch(self.REG_URL, work / "Roboto.ttf", progress, self.REG_SHA256)
-        ital = fetch(self.ITAL_URL, work / "Roboto-Italic.ttf", progress, self.ITAL_SHA256)
-        fetch(self.OFL_URL, stage / "OFL.txt", progress, self.OFL_SHA256)
-        progress("building Roboto static family")
-        run_builder(["roboto", str(reg), str(ital), str(stage), *WEIGHTS])
-        replaces = [str(p) for pat in ("Roboto-*.[ot]tf", "Roboto[[]*.ttf")
-                    for p in find_fonts(pat) if "Condensed" not in p.name and "Mono" not in p.name
-                    and "Slab" not in p.name and "Serif" not in p.name]
-        return Manifest(f"{self.VERSION} {self.COMMIT[:7]}", ["400", *WEIGHTS], replaces)
-
-
-class UbuntuSans(Package):
-    id, name = "ubuntu", "Ubuntu Sans"
-    weight_key, darkens = "ui_weight", True
-    summary = ("Ubuntu's UI font (24.04 and later), built as static faces with heavier weights and "
-               "darkening. Downloaded from github.com/canonical/Ubuntu-Sans-fonts.")
-    optional, BUILD = True, 1
-    VERSION = "1.006"
-    URL = (f"https://github.com/canonical/Ubuntu-Sans-fonts/releases/download/v{VERSION}/"
-           f"UbuntuSans-fonts-{VERSION}.zip")
-    SHA256 = "20aa7af47beaa6d64327782f7bf60df375edeedbdee2fe407e0bf9721890fb83"
-    FAMILY, PREFIX = "Ubuntu Sans", "UbuntuSans"
-    VARIABLE = ("UbuntuSans[wdth,wght].ttf", "UbuntuSans-Italic[wdth,wght].ttf")
-    REPLACES = ("UbuntuSans-*.[ot]tf", "UbuntuSans[[]*.ttf")
-
-    def build(self, stage, work, progress, folder):
-        release = _extract_zip(fetch(self.URL, work / f"{self.id}.zip", progress, self.SHA256), work / self.id)
-        files = [p for p in release.rglob("*") if p.is_file() and "__MACOSX" not in p.parts]
-        found = [[p for p in files if p.name == name] for name in self.VARIABLE]
-        if not all(found):
-            raise PackageError(f"{self.name}: release has no {' or '.join(self.VARIABLE)}")
-        licence = [p for p in files if p.name == "LICENCE.txt"]
-        if licence:
-            shutil.copy2(licence[0], stage / "LICENCE.txt")
-        progress(f"building {self.name} static family")
-        run_builder(["static-family", str(found[0][0]), str(found[1][0]), self.FAMILY, self.PREFIX,
-                     str(stage), *WEIGHTS])
-        replaces = [str(p) for pat in self.REPLACES for p in find_fonts(pat)]
-        return Manifest(self.VERSION, ["400", *WEIGHTS], replaces)
-
-
-class UbuntuSansMono(UbuntuSans):
-    id, name = "ubuntumono", "Ubuntu Sans Mono"
-    weight_key, darkens = "mono_weight", False
-    summary = ("Ubuntu's monospace font, static faces with heavier weights. Downloaded from "
-               "github.com/canonical/Ubuntu-Sans-Mono-fonts. Make it the terminal font with: "
-               "omarchy font set \"Ubuntu Sans Mono\"")
-    VERSION = "1.100"
-    URL = (f"https://github.com/canonical/Ubuntu-Sans-Mono-fonts/releases/download/v{VERSION}/"
-           f"Ubuntu-Sans-Mono-fonts-v{VERSION}.zip")
-    SHA256 = "0e459ed18b552190971561b3e474d0c4583db40483debf9e951321c2a1c2dec8"
-    FAMILY, PREFIX = "Ubuntu Sans Mono", "UbuntuSansMono"
-    VARIABLE = ("UbuntuSansMono[wght].ttf", "UbuntuSansMono-Italic[wght].ttf")
-    REPLACES = ("UbuntuSansMono-*.[ot]tf", "UbuntuSansMono[[]*.ttf")
-
-
-class SFPro(Package):
-    id, name = "sf", "SF Pro (Apple)"
-    weight_key = "sf_weight"
-    summary = "Apple's system fonts: SF Pro, SF Mono, New York. Downloaded from Apple, needs 7-Zip."
-    optional = True
-    license_note = ("Apple licenses the SF fonts only for creating mockups of user interfaces for "
-                    "Apple platforms. Installing them means you accept Apple's license.")
-    URLS = tuple(f"https://devimages-cdn.apple.com/design/resources/download/{n}.dmg"
-                 for n in ("SF-Pro", "SF-Mono", "NY"))
-    STATIC = ("SF-Pro-Text-*.otf", "SF-Pro-Display-*.otf", "SF-Pro-Rounded-*.otf",
-              "SF-Mono-*.otf", "NewYorkSmall-*.otf")
-
-    def install_sources(self):
-        return ([Source("Download from Apple")] if seven_zip() else []) + [Source("Import from a folder", ask=True)]
-
-    def blocker(self, folder=None):
-        if folder:
-            return None if any(folder.rglob("SF-Pro-Text-Regular.otf")) else \
-                f"no SF-Pro-Text-Regular.otf in {folder}"
-        return None if seven_zip() else "needs 7-Zip to unpack Apple's .dmg files (package 7zip or p7zip)"
-
-    def _unpack(self, archive: Path, out: Path) -> None:
-        """dmg -> pkg -> Payload -> cpio: 7-Zip opens every layer."""
-        queue, n = [archive], 0
-        while queue:
-            item, n = queue.pop(), n + 1
-            dest = out / f"layer{n}"
-            run([seven_zip(), "x", "-y", f"-o{dest}", str(item)], what=f"unpacking {item.name}")
-            queue += [p for p in dest.rglob("*") if p.is_file()
-                      and (p.suffix == ".pkg" or p.name in ("Payload", "Payload~"))]
-
-    def build(self, stage, work, progress, folder):
-        if folder is None:
-            for url in self.URLS:
-                dmg = fetch(url, work / url.rsplit("/", 1)[-1], progress)
-                progress(f"unpacking {dmg.name}")
-                self._unpack(dmg, work / dmg.stem)
-            folder = work
-        (stage / "400").mkdir()
-        for pattern in self.STATIC:
-            for f in sorted(folder.rglob(pattern)):
-                if not (stage / "400" / f.name).exists():
-                    shutil.copy2(f, stage / "400" / f.name)
-        weights = ["400"]
-        roman, italic = next(folder.rglob("SF-Pro.ttf"), None), next(folder.rglob("SF-Pro-Italic.ttf"), None)
-        if roman and italic and roman.parent == italic.parent:
-            progress("building SF Pro Text weights")
-            run_builder(["sf-pro-text", str(roman.parent), str(stage / "400"), str(stage), *WEIGHTS])
-            weights += WEIGHTS
-        return Manifest("Apple" if folder == work else f"imported from {folder}", weights)
-
-
 class WindowsFonts(Package):
     id, name = "windows", "Windows 11 fonts"
     summary = "Arial, Segoe UI, Consolas... Chromium only. Import from a Windows Fonts folder."
@@ -442,23 +284,18 @@ class WindowsFonts(Package):
         return Manifest(f"imported from {folder}")
 
 
-PACKAGES: tuple[Package, ...] = (Inter(), AdwaitaSans(), JetBrainsMono(), GoogleSansFlex(), Roboto(),
-                                  UbuntuSans(), UbuntuSansMono(), SFPro(), WindowsFonts())
+PACKAGES: tuple[Package, ...] = (Inter(), JetBrainsMono(), GoogleSansFlex(), WindowsFonts())
 BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 
 
 def outdated_notices() -> list[str]:
-    """One notice per package whose system source changed since it was built, or that an
-    older builder made."""
+    """One notice per package whose system source changed since it was built."""
     out = []
     for p in PACKAGES:
         if p.changed_inputs():
             out.append(f"{p.name}: the system copy changed since fontlab built it, so the system "
                        f"font is used for now. Rebuild with: fontlab fonts install {p.id}")
-        elif p.old_build():
-            out.append(f"{p.name}: built by an older fontlab, whose files are out of date. "
-                       f"Rebuild with: fontlab fonts install {p.id}")
     return out
 
 

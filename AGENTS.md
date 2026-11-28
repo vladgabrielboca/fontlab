@@ -28,7 +28,7 @@ fontlab/
   state.py                   state.toml and presets/<name>.toml read/write/normalize/validate
   paths.py                   Every input, output, and cache path on paths.P
   availability.py            Context.detect(): gates settings/choices on installed packages and shim
-  packages.py                Download/import/build manifests (inter, adwaita, jbm, googlesans, roboto, sf, windows)
+  packages.py                Download/import/build manifests (inter, jbm, googlesans, windows)
   fonts.py                   Plans, caches darkened builds, and atomically installs into ~/.local/share/fonts/fontlab
   fontconfig.py              Generates 70-fontlab-render.conf and 71-fontlab-web.conf
   chromium.py                Generates chromium-text.conf, chromium-fonts.conf, the uwsm/systemd LD_PRELOAD block

@@ -16,7 +16,10 @@ from .settings import BY_KEY, DEFAULTS, SETTINGS
 State = dict[str, str]
 
 # Settings that no longer exist. Old state files and presets still load; the key is dropped.
-REMOVED = {"session_shim"}      # 2026-11-28: the session shim is always on with the shim
+# 2026-11-28: the session shim is always on with the shim; the SF package was dropped.
+REMOVED = {"session_shim", "sf_weight"}
+# web_fonts choices whose packages were dropped (2026-11-28): the distro decides again.
+REMOVED_WEB_FONTS = {"ubuntu", "sf"}
 
 PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -38,7 +41,7 @@ def normalize(key: str, value: str) -> str:
     choices = BY_KEY[key].choices if key in BY_KEY else ()
     if value in choices:
         return value
-    if key == "web_fonts" and value == "default":      # name used before 2026-11-23, drop later
+    if key == "web_fonts" and (value == "default" or value in REMOVED_WEB_FONTS):  # "default": before 2026-11-23
         return "system"
     try:
         number = float(value)

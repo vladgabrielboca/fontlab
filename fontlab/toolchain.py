@@ -2,7 +2,6 @@
 
 fontTools: the system Python if it has it, else `uv run --with fonttools`, else a private
 venv in ~/.local/share/fontlab/venv (created once with pip).
-7-Zip: only for unpacking Apple's SF .dmg files.
 """
 
 from __future__ import annotations
@@ -61,16 +60,6 @@ def run_builder(args: list[str], stdin: str | None = None) -> None:
                             input=stdin, text=True, capture_output=True)
     if result.returncode != 0:
         raise ToolError(f"font build failed ({args[0]}):\n{result.stderr.strip()[-2000:]}")
-
-
-def seven_zip() -> str | None:
-    return shutil.which("7z") or shutil.which("7zz")
-
-
-def run(cmd: list[str], cwd=None, what: str = "") -> None:
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise ToolError(f"{what or cmd[0]} failed:\n{(result.stderr or result.stdout).strip()[-2000:]}")
 
 
 Progress = Callable[[str], None]

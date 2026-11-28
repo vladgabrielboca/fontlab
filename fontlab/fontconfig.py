@@ -27,27 +27,6 @@ LCDFILTER = {"default": "lcddefault", "light": "lcdlight", "legacy": "lcdlegacy"
 
 SANS_NAMES = ("sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Roboto", "Arial",
               "Helvetica", "Helvetica Neue", "Segoe UI")
-SF_EXTRA_NAMES = ("SF Pro", ".SF NS", "SF UI Text")
-
-# macOS details for the SF mapping: Display at 20pt+, SF Mono and New York for their
-# generic names, and New York Small's odd Bold/Black weights fixed so bold picks Bold.
-SF_RULES = """  <match target="pattern">
-    <test name="family" qual="first"><string>SF Pro Text</string></test>
-    <test name="size" compare="more_eq"><double>20</double></test>
-    <edit name="family" mode="prepend" binding="strong"><string>SF Pro Display</string></edit>
-  </match>
-""" + "".join(f"""  <match target="pattern">
-    <test name="family" qual="any"><string>{name}</string></test>
-    <edit name="family" mode="prepend" binding="strong"><string>{target}</string></edit>
-  </match>
-""" for name, target in (("ui-monospace", "SF Mono"), ("SFMono-Regular", "SF Mono"), ("Menlo", "SF Mono"),
-                         ("Monaco", "SF Mono"), ("ui-serif", "New York Small"), ("New York", "New York Small"),
-                         ("ui-rounded", "SF Pro Rounded"))) + "".join(f"""  <match target="scan">
-    <test name="family"><string>New York Small</string></test>
-    <test name="style"><string>{style}</string></test>
-    <edit name="weight" mode="assign"><int>{weight}</int></edit>
-  </match>
-""" for style, weight in (("Bold", 200), ("Bold Italic", 200), ("Black", 210), ("Black Italic", 210)))
 
 
 # One letter from each of these scripts. A font with none of them is treated as an icon
@@ -156,21 +135,14 @@ def _aliases(names: Iterable[str], target: str) -> str:
 """ for n in names)
 
 
-def web_conf(state: State, inter_available: bool, roboto: bool = False) -> str | None:
-    """None means no file: the system decides.
-    roboto: the Roboto package is installed, so keep Roboto resolving to itself instead of aliasing it."""
+def web_conf(state: State, inter_available: bool) -> str | None:
+    """None means no file: the system decides."""
     choice = state["web_fonts"]
     if choice == "windows":            # Chromium gets Windows fonts (chromium.py); others keep Inter
         choice = "inter" if inter_available else "system"
     if choice == "system":
         return None
-    rewrites = system_sans_rewrites()
-    sans = [n for n in SANS_NAMES if not (roboto and n == "Roboto")]
-    family = WEB_FONTS[choice].family
-    if choice == "sf":                 # macOS's extra names, Display, Mono and New York
-        body = _aliases([*sans, *SF_EXTRA_NAMES, *rewrites], family) + SF_RULES
-    else:
-        body = _aliases([*sans, *rewrites], family)
+    body = _aliases([*SANS_NAMES, *system_sans_rewrites()], WEB_FONTS[choice].family)
     note = ("  <!-- prepend+strong keeps the rest of the list, so CJK, emoji and icons still fall back. -->\n")
     return HEADER + "<fontconfig>\n" + note + body + "</fontconfig>\n"
 
@@ -181,4 +153,4 @@ def confs(state: State, sets) -> tuple[str, str | None]:
     have = {fs.family.id for fs in sets if fs.sources}
     rejects = [g for fs in sets for g in fs.rejects]
     return (render_conf(state, rejects, google_sans="googlesans" in have),
-            web_conf(state, inter_available="inter" in have, roboto="roboto" in have))
+            web_conf(state, inter_available="inter" in have))

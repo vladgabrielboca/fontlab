@@ -149,13 +149,19 @@ def install(state: State) -> tuple[bool, list[FontSet]]:
     """Make ~/.local/share/fonts/fontlab match the state. Returns (changed, sets)."""
     sets = plan(state)
     todo = [fs for fs in sets if installed_key(fs.family) != (fs.key if fs.sources else None)]
-    if not todo:
+    root = paths.P.installed_fonts
+    known = {fs.family.id for fs in sets}
+    # Folders of packages fontlab no longer has (roboto, sf... dropped 2026-11-28).
+    orphans = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith(".")
+               and d.name not in known] if root.is_dir() else []
+    if not todo and not orphans:
         return False, sets
     files = realize([fs for fs in todo if fs.sources])
-    root = paths.P.installed_fonts
     root.mkdir(parents=True, exist_ok=True)
     dirs = [root] + [root / fs.family.id for fs in todo]
     before = {d: d.stat().st_mtime_ns for d in dirs if d.exists()}
+    for d in orphans:
+        shutil.rmtree(d)
     for fs in todo:
         # A family without files keeps an empty folder, so the folder never comes and
         # goes and its old mtime is always known to newer_than() below.

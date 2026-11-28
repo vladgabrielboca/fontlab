@@ -57,12 +57,12 @@ class SharedTablesTest(unittest.TestCase):
     def test_package_links(self) -> None:
         from fontlab.availability import needs, unlocks
         from fontlab.packages import unlocking
-        self.assertEqual([p.id for p in unlocking("ui_weight")], ["inter", "adwaita", "roboto", "ubuntu"])
-        self.assertEqual(needs(BY_KEY["darkening"]), ("inter", "adwaita", "roboto", "ubuntu"))
-        self.assertEqual(needs(BY_KEY["mono_weight"]), ("jbm", "ubuntumono"))
+        self.assertEqual([p.id for p in unlocking("ui_weight")], ["inter"])
+        self.assertEqual(needs(BY_KEY["darkening"]), ("inter",))
+        self.assertEqual(needs(BY_KEY["mono_weight"]), ("jbm",))
         self.assertEqual(needs(BY_KEY["gamma"]), ("shim",))
-        self.assertEqual(unlocks(BY_ID["sf"]), ["SF Pro Text weight", "web font sf"])
-        self.assertEqual([p.id for p in fonts.families()][-1], "sf")      # windows is Chromium only
+        self.assertEqual(unlocks(BY_ID["windows"]), ["web font windows"])
+        self.assertEqual([p.id for p in fonts.families()][-1], "googlesans")  # windows is Chromium only
 
     def test_replace_block(self) -> None:
         import re
@@ -95,10 +95,11 @@ class StateTest(TempHome):
 
     def test_removed_settings_are_dropped(self) -> None:
         f = paths.P.state_file
-        self.fake_font(f, 'session_shim = "on"\ngamma = "1.3"\n')
+        self.fake_font(f, 'session_shim = "on"\nsf_weight = "450"\nweb_fonts = "ubuntu"\ngamma = "1.3"\n')
         self.assertEqual(statefile.load(), dict(DEFAULTS, gamma="1.3"))
         statefile.save(statefile.load())
         self.assertNotIn("session_shim", f.read_text())
+        self.assertNotIn("sf_weight", f.read_text())
 
     def test_presets(self) -> None:
         st = dict(DEFAULTS, darkening="0.75")
@@ -119,11 +120,9 @@ class AvailabilityTest(TempHome):
         self.assertEqual(ctx.choices(BY_KEY["web_fonts"]), ["system"])
 
     def test_preset_from_another_machine_falls_back(self) -> None:
-        st, notices = Context.detect().effective(dict(DEFAULTS, web_fonts="sf", sf_weight="450", hinting="full"))
-        self.assertEqual((st["web_fonts"], st["sf_weight"], st["hinting"]), ("system", "400", "full"))
+        st, notices = Context.detect().effective(dict(DEFAULTS, web_fonts="inter", ui_weight="450", hinting="full"))
+        self.assertEqual((st["web_fonts"], st["ui_weight"], st["hinting"]), ("system", "400", "full"))
         self.assertEqual(len(notices), 2)
-        st, _ = Context.detect().effective(dict(DEFAULTS, web_fonts="ubuntu"))
-        self.assertEqual(st["web_fonts"], "system")
 
     def test_locked_setting_keeps_its_value_but_applies_the_default(self) -> None:
         ctx = Context.detect()
@@ -135,8 +134,6 @@ class AvailabilityTest(TempHome):
         rgb = dict(st, antialias="rgb")
         self.assertIsNone(ctx.locked(rgb, BY_KEY["lcdfilter"]))
         self.assertEqual(ctx.effective(rgb)[0]["lcdfilter"], "legacy")
-        # A lock follows the value apply uses: web_fonts=sf without the package is system.
-        self.assertIsNotNone(ctx.locked(dict(DEFAULTS, web_fonts="sf"), BY_KEY["sf_weight"]))
 
     def test_vencord_needs_a_client(self) -> None:
         self.assertIn("Vencord", Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
@@ -144,10 +141,10 @@ class AvailabilityTest(TempHome):
         self.assertIsNone(Context.detect().setting_blocker(BY_KEY["vencord_fonts"]))
 
     def test_weight_choices_follow_manifest(self) -> None:
-        self.fake_package("sf", {"400": ["SF-Pro-Text-Regular.otf"]})     # no variable font: 400 only
+        self.fake_package("inter", {"400": ["Inter-Regular.ttf"]})        # no heavier weights built
         ctx = Context.detect()
-        self.assertEqual(ctx.choices(BY_KEY["sf_weight"]), ["400"])
-        self.assertIn("sf", ctx.choices(BY_KEY["web_fonts"]))
+        self.assertEqual(ctx.choices(BY_KEY["ui_weight"]), ["400"])
+        self.assertIn("inter", ctx.choices(BY_KEY["web_fonts"]))
 
 
 class FontsTest(TempHome):
@@ -158,19 +155,18 @@ class FontsTest(TempHome):
                           replaces=["/usr/share/fonts/inter/Inter.ttc"])
         self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]},
                           replaces=["/usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"])
-        self.fake_package("sf", {"400": ["SF-Pro-Text-Regular.otf", "SF-Mono-Regular.otf"],
-                                 "450": ["SF-Pro-Text-Regular.ttf"]})
+        self.fake_package("googlesans", {"400": ["GoogleSansFlex.ttf"]})
 
     def installed(self, rel: str) -> Path:
         return paths.P.installed_fonts / rel
 
     def test_weight_overrides_by_stem(self) -> None:
-        names = sorted(p.name for p in fonts.source_files(BY_ID["sf"], BY_ID["sf"].manifest(), "450"))
-        self.assertEqual(names, ["SF-Mono-Regular.otf", "SF-Pro-Text-Regular.ttf"])
+        names = sorted((p.parent.name, p.name) for p in fonts.source_files(BY_ID["inter"], BY_ID["inter"].manifest(), "450"))
+        self.assertEqual(names, [("400", "Inter-Bold.ttf"), ("450", "Inter-Italic.ttf"), ("450", "Inter-Regular.ttf")])
 
     def test_missing_package_installs_nothing(self) -> None:
         fonts.install(dict(DEFAULTS))
-        self.assertFalse(self.installed("adwaita").exists())
+        self.assertFalse(self.installed("windows").exists())
 
     def test_install_replaces_whole_family(self) -> None:
         st = dict(DEFAULTS, ui_weight="450", mono_weight="475")
@@ -191,10 +187,10 @@ class FontsTest(TempHome):
 
     def test_removing_a_package_removes_its_fonts(self) -> None:
         fonts.install(dict(DEFAULTS))
-        self.assertTrue(self.installed("sf").exists())
-        BY_ID["sf"].remove()
+        self.assertTrue(self.installed("googlesans").exists())
+        BY_ID["googlesans"].remove()
         fonts.install(dict(DEFAULTS))
-        self.assertEqual(list(self.installed("sf").iterdir()), [])
+        self.assertEqual(list(self.installed("googlesans").iterdir()), [])
 
     def test_folder_mtime_leaves_the_cached_second(self) -> None:
         # fontconfig keeps a cache while the folder mtime's whole second is unchanged.
@@ -206,39 +202,20 @@ class FontsTest(TempHome):
         for d in dirs:
             self.assertNotEqual(d.stat().st_mtime_ns // 10**9, before[d], d)
 
-    def test_roboto_follows_weight_and_darkening_google_sans_stays_stock(self) -> None:
-        self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "googlesans"))
-        self.assertFalse(fonts.installed(fonts.plan(dict(DEFAULTS)), "roboto"))
-        self.fake_package("googlesans", {"400": ["GoogleSansFlex.ttf"]})
-        self.fake_package("roboto", {"400": ["Roboto-Regular.ttf", "Roboto-Bold.ttf"],
-                                     "450": ["Roboto-Regular.ttf"]})
-        st = dict(DEFAULTS, ui_weight="450", darkening="0.50")
-        sets = fonts.plan(st)
-        rob = next(fs for fs in sets if fs.family.id == "roboto")
-        self.assertEqual(rob.darken, 0.5)
-        self.assertTrue(any(p.name == "Roboto-Regular.ttf" and p.parent.name == "450" for p in rob.sources))
+    def test_folders_of_dropped_packages_are_removed(self) -> None:
+        fonts.install(dict(DEFAULTS))
+        self.fake_font(self.installed("roboto/Roboto-Regular.ttf"))
+        self.assertTrue(fonts.install(dict(DEFAULTS))[0])
+        self.assertFalse(self.installed("roboto").exists())
+        self.assertFalse(fonts.install(dict(DEFAULTS))[0])
+
+    def test_google_sans_stays_stock(self) -> None:
+        sets = fonts.plan(dict(DEFAULTS, ui_weight="450", darkening="0.50"))
         gs = next(fs for fs in sets if fs.family.id == "googlesans")
         self.assertEqual(gs.darken, 0.0)
         self.assertEqual([p.parent.name for p in gs.sources], ["400"])
         self.assertTrue(fonts.installed(sets, "googlesans"))
-
-    def test_ubuntu_sans_follows_ui_weight_mono_follows_mono_weight(self) -> None:
-        self.fake_package("ubuntu", {"400": ["UbuntuSans-Regular.ttf", "UbuntuSans-Bold.ttf"],
-                                     "450": ["UbuntuSans-Regular.ttf"]},
-                          replaces=["/usr/share/fonts/ubuntu/UbuntuSans[wdth,wght].ttf"])
-        self.fake_package("ubuntumono", {"400": ["UbuntuSansMono-Regular.ttf"],
-                                         "475": ["UbuntuSansMono-Regular.ttf"]})
-        sets = fonts.plan(dict(DEFAULTS, ui_weight="450", mono_weight="475", darkening="0.50"))
-        sans = next(fs for fs in sets if fs.family.id == "ubuntu")
-        mono = next(fs for fs in sets if fs.family.id == "ubuntumono")
-        self.assertEqual((sans.darken, mono.darken), (0.5, 0.0))
-        self.assertEqual({p.name: p.parent.name for p in sans.sources},
-                         {"UbuntuSans-Regular.ttf": "450", "UbuntuSans-Bold.ttf": "400"})
-        self.assertEqual([p.parent.name for p in mono.sources], ["475"])
-        self.assertEqual(sans.rejects, ("/usr/share/fonts/ubuntu/UbuntuSans[wdth,wght].ttf",))
-        ctx = Context.detect()
-        self.assertIn("ubuntu", ctx.choices(BY_KEY["web_fonts"]))
-        self.assertIn("475", ctx.choices(BY_KEY["mono_weight"]))
+        self.assertEqual(next(fs for fs in sets if fs.family.id == "inter").darken, 0.5)
 
     def test_reinstalled_package_is_reinstalled(self) -> None:
         fonts.install(dict(DEFAULTS))
@@ -296,12 +273,6 @@ class FontconfigTest(TempHome):
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS), inter_available=True))
         self.assertIn("<string>Inter</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True))
         self.assertIn("<string>Roboto</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True))
-        self.assertNotIn("<string>Roboto</string>",
-                         fontconfig.web_conf(dict(DEFAULTS, web_fonts="inter"), True, roboto=True))
-        self.assertIn("SF Pro Display", fontconfig.web_conf(dict(DEFAULTS, web_fonts="sf"), True))
-        ubuntu = fontconfig.web_conf(dict(DEFAULTS, web_fonts="ubuntu"), True)
-        self.assertIn('binding="strong"><string>Ubuntu Sans</string>', ubuntu)
-        self.assertNotIn("<string>Inter</string>", ubuntu)
         # windows: other apps keep Inter when it is installed, else the system default
         self.assertIn("<string>Inter</string>", fontconfig.web_conf(dict(DEFAULTS, web_fonts="windows"), True))
         self.assertIsNone(fontconfig.web_conf(dict(DEFAULTS, web_fonts="windows"), False))
@@ -329,9 +300,9 @@ class ChromiumTest(TempHome):
     def test_system_ui_follows_web_fonts(self) -> None:
         with self.ui_font("Adwaita Sans"):
             self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS)))          # system: desktop decides
-            xml = chromium.fonts_conf(dict(DEFAULTS, web_fonts="sf"))
+            xml = chromium.fonts_conf(dict(DEFAULTS, web_fonts="inter"))
             self.assertIn("<string>Adwaita Sans</string>", xml)
-            self.assertIn("<string>SF Pro Text</string>", xml)
+            self.assertIn('binding="strong"><string>Inter</string>', xml)
             self.assertIn("/50-user.conf", xml)                            # user's own rules stay
             self.assertNotIn("web-windows.conf", xml)
             win = chromium.fonts_conf(dict(DEFAULTS, web_fonts="windows"))
@@ -359,7 +330,7 @@ class ChromiumTest(TempHome):
         self.assertEqual(chromium.hint_rule(dict(DEFAULTS)), "")       # defaults agree: nothing to add
         full = dict(DEFAULTS, hinting="full")                          # chromium_hinting stays slight
         self.assertIn("hintslight", chromium.hint_rule(full))
-        for choice in ("system", "inter", "ubuntu", "sf", "windows"):
+        for choice in ("system", "inter", "windows"):
             xml = chromium.fonts_conf(dict(full, web_fonts=choice))
             self.assertIn("<const>hintslight</const>", xml, choice)    # override is present
             if choice == "windows":                                     # and comes after the render conf
@@ -607,7 +578,7 @@ class EnvironmentTest(unittest.TestCase):
 
 
 class StaleSystemPackageTest(TempHome):
-    """adwaita and jbm are built from system files; a system update must not leave the
+    """jbm is built from system files; a system update must not leave the
     old copy installed and hiding the new one."""
 
     def setUp(self) -> None:
@@ -703,22 +674,6 @@ class ShimEnvironmentTest(TempHome):
 
 
 class AuditFixesTest(TempHome):
-    def test_old_build_asks_for_a_rebuild(self) -> None:
-        self.fake_package("roboto", {"450": ["Roboto-Regular.ttf"]})     # manifest without "build"
-        self.assertTrue(BY_ID["roboto"].old_build())
-        self.assertIn("fontlab fonts install roboto", packages.outdated_notices()[0])
-        f = paths.P.sources / "roboto/manifest.json"
-        f.write_text(json.dumps(json.loads(f.read_text()) | {"build": BY_ID["roboto"].BUILD}))
-        self.assertFalse(BY_ID["roboto"].old_build())
-        self.assertEqual(packages.outdated_notices(), [])
-        self.fake_package("inter", {"450": ["Inter-Regular.ttf"]})       # BUILD 0: never asks
-        self.assertFalse(BY_ID["inter"].old_build())
-
-    def test_old_build_keeps_its_files(self) -> None:
-        self.fake_package("roboto", {"450": ["Roboto-Regular.ttf"]})
-        rob = next(fs for fs in fonts.plan(dict(DEFAULTS, ui_weight="450")) if fs.family.id == "roboto")
-        self.assertTrue(rob.sources)
-
     def test_prune_drops_tmp_dirs_and_does_not_count_them(self) -> None:
         b = paths.P.builds_dir
         for i in range(fonts.KEEP_BUILDS):

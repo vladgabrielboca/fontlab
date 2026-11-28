@@ -19,7 +19,6 @@ EPILOG = """examples:
   fontlab                          open the interactive screen
   fontlab fonts                    font packages and whether they are installed
   fontlab fonts install inter
-  fontlab fonts install sf --accept-license
   fontlab fonts install windows --from /run/media/me/Windows/Windows/Fonts
   fontlab set gamma=1.4 hinting=slight
   fontlab preset save mac-half
@@ -121,10 +120,8 @@ def cmd_fonts(args) -> None:
         for p in PACKAGES:
             m = p.manifest()
             outdated = bool(m and p.changed_inputs(m))
-            old = bool(m and p.old_build(m))
-            mark = "!" if outdated or old else "✓" if m else " "
+            mark = "!" if outdated else "✓" if m else " "
             detail = (f"{m.version}, system copy changed: fontlab fonts install {p.id}" if outdated
-                      else f"{m.version}, built by an older fontlab: fontlab fonts install {p.id}" if old
                       else m.version if m else p.unavailable() or "not installed")
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
@@ -166,7 +163,6 @@ def cmd_doctor(_args) -> None:
     line(bool(shutil.which("fc-cache")), "fontconfig (fc-cache)")
     line(True, f"fontTools: {toolchain.fonttools_source()}")
     line(desktop.gsettings_available(), "gsettings (GNOME interface schema; optional)")
-    line(bool(toolchain.seven_zip()), "7-Zip (only for downloading SF from Apple)")
     ctx = Context.detect()
     line(ctx.shim, f"Chromium shim {paths.P.shim} (install.sh)")
     if ctx.shim:
@@ -182,8 +178,6 @@ def cmd_doctor(_args) -> None:
     for p in PACKAGES:
         if p.installed and p.changed_inputs():
             line(False, f"font package {p.id}: system copy changed, rebuild with: fontlab fonts install {p.id}")
-        elif p.old_build():
-            line(False, f"font package {p.id}: built by an older fontlab, rebuild with: fontlab fonts install {p.id}")
         else:
             line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(st),
@@ -235,7 +229,7 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("action", nargs="?", choices=("install", "remove"))
     f.add_argument("package", nargs="?")
     f.add_argument("--from", dest="from_dir", metavar="DIR", help="import from a folder instead of downloading")
-    f.add_argument("--accept-license", action="store_true", help="accept the font's license (sf, windows)")
+    f.add_argument("--accept-license", action="store_true", help="accept the font's license (windows)")
     f.set_defaults(func=cmd_fonts)
     sub.add_parser("doctor", help="check this system").set_defaults(func=cmd_doctor)
     pv = sub.add_parser("preview", help="open the preview window once")

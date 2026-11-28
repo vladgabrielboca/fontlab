@@ -27,8 +27,6 @@ class WebFont:
 WEB_FONTS: dict[str, WebFont] = {
     "system": WebFont(None, None, None),
     "inter": WebFont("Inter", "Inter", "inter"),
-    "ubuntu": WebFont("Ubuntu Sans", "Ubuntu Sans", "ubuntu"),
-    "sf": WebFont("SF Pro Text", "SF Pro Text", "sf"),
     "windows": WebFont(None, "Segoe UI", "windows"),   # Chromium only; other apps keep Inter
 }
 
@@ -75,20 +73,16 @@ SETTINGS: tuple[Setting, ...] = (
     # Fonts: files built and installed into ~/.local/share/fonts/fontlab.
     Setting("darkening", "Fonts", "Darkening", steps(0, 1, 0.05, 2), "0.00",
             "macOS-style stem darkening baked into the font files. 1 = macOS strength.",
-            "every app using Inter, Adwaita Sans, Roboto or Ubuntu Sans"),
+            "every app using Inter"),
     Setting("ui_weight", "Fonts", "UI font weight", WEIGHTS, "400",
             "Weight of the Regular and Italic faces. 400 = stock.",
-            "every app using Inter, Adwaita Sans, Roboto or Ubuntu Sans"),
+            "every app using Inter"),
     Setting("mono_weight", "Fonts", "Monospace weight", WEIGHTS, "400",
             "Weight of the Regular and Italic faces. 400 = stock.",
-            "JetBrains Mono and Ubuntu Sans Mono; open a new terminal window to see it"),
-    Setting("sf_weight", "Fonts", "SF Pro Text weight", WEIGHTS, "400",
-            "Weight of SF Pro Text Regular and Italic. 400 = stock.",
-            "every app, through web and UI sans font sf",
-            active_when=(("web_fonts", ("sf",)),)),
+            "JetBrains Mono; open a new terminal window to see it"),
     Setting("web_fonts", "Fonts", "Web and UI sans font", tuple(WEB_FONTS), "system",
             "What sans-serif, system-ui, Arial, Helvetica and Segoe UI become. system: your distro "
-            "decides. ubuntu: Ubuntu Sans, as on Ubuntu 24.04. windows: Chromium uses the Windows 11 "
+            "decides. inter: Inter. windows: Chromium uses the Windows 11 "
             "fonts, other apps get Inter.",
             "web pages and apps that ask for a generic sans font"),
     Setting("vencord_fonts", "Fonts", "Discord font (Vencord)", ("off", "on"), "on",
