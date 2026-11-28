@@ -21,7 +21,7 @@ Use this procedure whenever you compare visual or pixel-level rendering changes 
 - Set `TMPDIR=/tmp` and `XDG_RUNTIME_DIR=/tmp`. Longer temp paths crash Chromium with `FATAL: process_singleton_posix.cc: Socket path too long`.
 - Mirror `fontlab.preview.compare_setup()` in your temp dir:
   - Build or symlink only the font files needed for the test into `<tmp>/fonts/<family>/`.
-  - Write `<tmp>/render.conf`, `<tmp>/web.conf`, and `<tmp>/fonts.conf` via `chromium.private_fonts_conf(..., extra_dirs=(font_dir,), hidden_dirs=(paths.P.installed_fonts,))`.
+  - Write `<tmp>/render.conf`, `<tmp>/web.conf`, and `<tmp>/fonts.conf` via `chromium.private_fonts_conf(rules, windows=..., user_confs=[...], preview_fonts=font_dir)` (the way `preview.compare_setup()` does it).
   - Run `fc-cache <font_dir>` with `FONTCONFIG_FILE=<tmp>/fonts.conf`.
   - Pop `LD_PRELOAD` and `FONTLAB_TEXT_CONF` from `env`. When testing non-default `contrast`/`gamma`, write `<tmp>/chromium-text.conf`, and set `FONTLAB_TEXT_CONF` and `LD_PRELOAD=~/.local/share/fontlab/runtime/fontlab-text-shim.so`. The shim adds `--text-contrast`/`--text-gamma` itself.
 - Pass `--headless=new --no-first-run --no-default-browser-check --hide-scrollbars --force-device-scale-factor=1 --window-size=640,460 --user-data-dir=<tmp>/profile --screenshot=<out.png> file://<html_path>`.

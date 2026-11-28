@@ -364,7 +364,10 @@ class ChromiumTest(TempHome):
             xml = chromium.fonts_conf(dict(DEFAULTS, web_fonts="inter"))
             self.assertIn("<string>Adwaita Sans</string>", xml)
             self.assertIn('binding="strong"><string>Inter</string>', xml)
-            self.assertIn("/50-user.conf", xml)                            # user's own rules stay
+            # The desktop's own config, read live, then fontlab's rules after it.
+            self.assertIn(f"<include ignore_missing=\"yes\">{paths.SYSTEM_FONTCONFIG_DIR.parent}/fonts.conf</include>", xml)
+            self.assertLess(xml.index("fonts.conf"), xml.index("Adwaita Sans"))
+            self.assertNotIn("conf.d", xml)
             self.assertNotIn("web-windows.conf", xml)
             win = chromium.fonts_conf(dict(DEFAULTS, web_fonts="windows"))
             self.assertIn("<string>Segoe UI</string>", win)
@@ -375,7 +378,7 @@ class ChromiumTest(TempHome):
             self.assertIsNone(chromium.fonts_conf(dict(DEFAULTS, web_fonts="inter")))
 
     def test_private_conf_skips_user_conf_d(self) -> None:
-        xml = chromium.private_fonts_conf()
+        xml = chromium.private_fonts_conf("", windows=True)
         self.assertNotIn("50-user.conf", xml)
         self.assertIn("web-windows.conf", xml)
         self.assertIn(str(paths.P.render_conf), xml)
@@ -384,7 +387,7 @@ class ChromiumTest(TempHome):
         late = xml.index('mode="prepend_first" binding="strong"><string>-apple-system')
         self.assertLess(xml.index(str(paths.P.render_conf)), late)
         self.assertIn("BlinkMacSystemFont", xml[late:])
-        self.assertNotIn("prepend_first", chromium.private_fonts_conf(windows=False))
+        self.assertNotIn("prepend_first", chromium.private_fonts_conf("", windows=False))
 
     def test_chromium_hinting_can_differ(self) -> None:
         """FreeType wants full, Chromium wants slight; the second rule must win for Chromium only."""
