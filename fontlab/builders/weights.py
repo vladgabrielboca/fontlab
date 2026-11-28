@@ -8,8 +8,9 @@ so apps still see it as "<Family> Regular". Ported from fontations-weight-fix
 import os
 
 from fontTools.ttLib import TTFont
-from fontTools.ttLib.tables import ttProgram
 from fontTools.varLib.instancer import instantiateVariableFont
+
+from hinting import drop_hinting, is_hinted
 
 
 def _take_identity(inst, static, extra_os2=()):
@@ -23,6 +24,18 @@ def _take_identity(inst, static, extra_os2=()):
             del inst[t]
 
 
+def instance(vf_path, loc):
+    """Static instance of a variable font at loc. A hinted variable font without `cvar`
+    carries instructions for its default master only, so other instances lose them."""
+    vf = TTFont(vf_path)
+    keep = is_hinted(vf) and ("cvar" in vf or all(
+        loc.get(a.axisTag, a.defaultValue) == a.defaultValue for a in vf["fvar"].axes))
+    f = instantiateVariableFont(vf, loc)
+    if is_hinted(f) and not keep:
+        drop_hinting(f)
+    return f
+
+
 # --- Inter --------------------------------------------------------------------------
 
 def inter(release_dir, out_dir, weights):
@@ -31,7 +44,7 @@ def inter(release_dir, out_dir, weights):
     for w in weights:
         os.makedirs(os.path.join(out_dir, str(w)), exist_ok=True)
         for var, static in pairs:
-            inst = instantiateVariableFont(TTFont(os.path.join(release_dir, var)), {"wght": w, "opsz": 14})
+            inst = instance(os.path.join(release_dir, var), {"wght": w, "opsz": 14})
             _take_identity(inst, TTFont(os.path.join(release_dir, "extras", "ttf", static)), ("achVendID",))
             inst.save(os.path.join(out_dir, str(w), static))
 
@@ -75,11 +88,11 @@ def adwaita(system_dir, out_dir, weights):
         for inst in TTFont(path)["fvar"].instances:
             style = TTFont(path)["name"].getDebugName(inst.subfamilyNameID)
             loc = dict(inst.coordinates, opsz=14)
-            f = instantiateVariableFont(TTFont(path), loc)
+            f = instance(path, loc)
             _static_names(f, "Adwaita Sans", "AdwaitaSans", style, int(loc["wght"]), italic,
                           os.path.join(out_dir, "400", f"AdwaitaSans-{style.replace(' ', '')}.ttf"))
         for w in weights:
-            f = instantiateVariableFont(TTFont(path), {"wght": w, "opsz": 14})
+            f = instance(path, {"wght": w, "opsz": 14})
             _static_names(f, "Adwaita Sans", "AdwaitaSans", "Italic" if italic else "Regular",
                           400, italic, os.path.join(out_dir, str(w), src))
 
@@ -98,13 +111,13 @@ def static_family(regular_vf, italic_vf, family, ps_prefix, out_dir, weights):
             if loc.get("wdth", 100.0) != 100.0:
                 continue
             style = meta["name"].getDebugName(inst.subfamilyNameID)
-            f = instantiateVariableFont(TTFont(path), loc)
+            f = instance(path, loc)
             _static_names(f, family, ps_prefix, style, int(round(loc["wght"])), italic,
                           os.path.join(out_dir, "400", f"{ps_prefix}-{style.replace(' ', '')}.ttf"))
         for w in weights:
             style = "Italic" if italic else "Regular"
             loc = {"wght": w, **({"wdth": 100.0} if "wdth" in axes else {})}
-            f = instantiateVariableFont(TTFont(path), loc)
+            f = instance(path, loc)
             _static_names(f, family, ps_prefix, style, 400, italic,
                           os.path.join(out_dir, str(w), f"{ps_prefix}-{style}.ttf"))
 
@@ -132,16 +145,7 @@ def jetbrains_mono(base_regular, base_italic, variable_dir, out_dir, weights):
                     g.expand(dg)
                     bg[name] = g
                     base["hmtx"][name] = donor["hmtx"][name]
-            for t in ("fpgm", "prep", "cvt "):
-                if t in base:
-                    del base[t]
-            if "gasp" in base:
-                base["gasp"].gaspRange = {0xFFFF: 0x000A}   # smooth, no grid fitting
-            for name in base.getGlyphOrder():
-                g = bg[name]
-                if g.numberOfContours != 0:
-                    g.program = ttProgram.Program()
-                    g.program.fromBytecode(b"")
+            drop_hinting(base)
             base.save(os.path.join(out_dir, str(w), os.path.basename(base_path)))
 
 

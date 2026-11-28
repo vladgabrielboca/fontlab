@@ -121,8 +121,10 @@ def cmd_fonts(args) -> None:
     if args.action is None:
         for p in PACKAGES:
             m = p.manifest()
-            mark = "✓" if m else " "
-            detail = m.version if m else p.unavailable() or "not installed"
+            outdated = bool(m and p.changed_inputs(m))
+            mark = "!" if outdated else "✓" if m else " "
+            detail = (f"{m.version}, system copy changed: fontlab fonts install {p.id}" if outdated
+                      else m.version if m else p.unavailable() or "not installed")
             kind = "optional" if p.optional else ""
             print(f" {mark} {p.id:<10} {p.name:<18} {kind:<9} {detail}")
             print(f"   {'':<10} {p.summary}")
@@ -203,7 +205,10 @@ def cmd_doctor(_args) -> None:
         line(active, "session-wide shim active in this login"
              if active else "session-wide shim enabled in ~/.config/uwsm/env: log out and back in")
     for p in PACKAGES:
-        line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
+        if p.installed and p.changed_inputs():
+            line(False, f"font package {p.id}: system copy changed, rebuild with: fontlab fonts install {p.id}")
+        else:
+            line(p.installed or p.optional, f"font package {p.id}: " + ("installed" if p.installed else "not installed"))
     line(not desktop.environment_pending(st),
          "/etc/environment matches the state")
 

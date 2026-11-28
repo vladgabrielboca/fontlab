@@ -111,7 +111,7 @@ SETTINGS: tuple[Setting, ...] = (
             "Grid fitting for all Chromium text, code blocks included. Kept apart because Chromium "
             "and FreeType want opposite values: slight keeps subpixel spacing, full makes glyphs "
             "land wrong.",
-            "Chromium and Electron apps; restart the app"),
+            "Chromium and Electron apps; restart the app", needs=("shim",)),
     Setting("session_shim", "Chromium", "Session-wide shim", ("off", "on"), "off",
             "on: the shim goes into LD_PRELOAD for the whole login (~/.config/uwsm/env and "
             "systemd --user), so apps started from keybinds or terminals get the settings above too.",

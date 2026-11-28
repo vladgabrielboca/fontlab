@@ -70,7 +70,7 @@ class Paths:
     @property
     def chromium_fonts_conf(self) -> Path:
         """Private fontconfig for Chromium-family apps (see chromium.fonts_conf).
-        chromium-env.sh exports FONTCONFIG_FILE to it when it exists."""
+        The shim sets FONTCONFIG_FILE to it inside Chromium processes when it exists."""
         return self.config_dir / "chromium-fonts.conf"
 
     @property

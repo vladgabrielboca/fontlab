@@ -3,7 +3,9 @@
 //    Skia switches to renderers), via both the zygote fork socket and no-zygote exec*.
 //  - sets FONTCONFIG_FILE to ~/.config/fontlab/chromium-fonts.conf (when present and not
 //    already set), so CSS system-ui and Windows web fonts work even when an app is launched
-//    from a keybind or terminal instead of a wrapper.
+//    from a keybind or terminal instead of a wrapper. Only the Chromium process that loaded
+//    the shim reads it: every exec*/posix_spawn from it drops the variable again, so a
+//    terminal, editor or helper the app starts keeps the desktop's own fontconfig.
 // Safe to load session-wide via LD_PRELOAD: non-Chromium processes exit shim_init() after
 // a single access() check and hit a one-branch fast path in every hooked call. All real_*
 // symbols are resolved eagerly at load time so forked children never call dlsym().
@@ -33,10 +35,13 @@ static int (*real_execvp)(const char *, char *const[]);
 static int (*real_execvpe)(const char *, char *const[], char *const[]);
 static int (*real_posix_spawn)(pid_t *, const char *, const posix_spawn_file_actions_t *,
                                const posix_spawnattr_t *, char *const[], char *const[]);
+static int (*real_posix_spawnp)(pid_t *, const char *, const posix_spawn_file_actions_t *,
+                                const posix_spawnattr_t *, char *const[], char *const[]);
 static char extra[2][64];
 static int have_extra = 0;
 static int is_chromium = 0;
 static int lcd_box = 0;
+static char fc_env[600];   // "FONTCONFIG_FILE=<path>" when the shim set it, else empty
 
 static void load_conf(void) {
   have_extra = 0;
@@ -67,8 +72,9 @@ static void load_fontconfig(void) {
   if (!home || !*home) return;
   char path[512];
   int n = snprintf(path, sizeof path, "%s/.config/fontlab/chromium-fonts.conf", home);
-  if (n > 0 && (size_t)n < sizeof path && access(path, R_OK) == 0) {
-    setenv("FONTCONFIG_FILE", path, 0);
+  if (n > 0 && (size_t)n < sizeof path && access(path, R_OK) == 0 &&
+      setenv("FONTCONFIG_FILE", path, 0) == 0) {
+    snprintf(fc_env, sizeof fc_env, "FONTCONFIG_FILE=%s", path);
   }
 }
 
@@ -138,7 +144,8 @@ static void patch_lcd_filter(void) {
 // this .so on in LD_PRELOAD. The first Chromium binary (its folder holds icudtl.dat) keeps
 // the hook, sets FONTCONFIG_FILE if needed, and drops the .so from LD_PRELOAD, so zygote,
 // GPU, renderers and anything the app opens (a terminal inside an editor, say) do not load it.
-// With LCD_FILTER=box it stays: each Chromium process patches its own copy of the filter.
+// With LCD_FILTER=box it stays: each Chromium process patches its own copy of the filter
+// (and sets FONTCONFIG_FILE again for itself, since child_env() drops it).
 static int file_in_dir(const char *dir, const char *name) {
   char p[1024];
   snprintf(p, sizeof p, "%s/%s", dir, name);
@@ -154,6 +161,7 @@ __attribute__((constructor)) static void shim_init(void) {
   real_execvp = dlsym(RTLD_NEXT, "execvp");
   real_execvpe = dlsym(RTLD_NEXT, "execvpe");
   real_posix_spawn = dlsym(RTLD_NEXT, "posix_spawn");
+  real_posix_spawnp = dlsym(RTLD_NEXT, "posix_spawnp");
 
   char exe[512];
   ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
@@ -273,41 +281,72 @@ static void with_flags(char *const argv[], char *out[]) {
   out[n] = NULL;
 }
 
+// FONTCONFIG_FILE as set by load_fontconfig() is for this process only. Renderers get
+// fonts from the browser process over IPC, so no child needs it, and children that are not
+// Chromium (a shell in an editor, xdg-open, a helper) must keep the desktop fontconfig.
+// Also runs between fork and exec: the copy lives on the stack. A value the user set
+// themselves (fc_env empty) is passed on untouched.
+#define MAX_ENV 2048
+
+static char *const *child_env(char *const envp[], char *out[]) {
+  if (!*fc_env || !envp) return envp;
+  int n = 0, dropped = 0;
+  for (int i = 0; envp[i]; i++) {
+    if (!strcmp(envp[i], fc_env)) { dropped = 1; continue; }
+    if (n >= MAX_ENV - 1) return envp;
+    out[n++] = envp[i];
+  }
+  out[n] = NULL;
+  return dropped ? out : envp;
+}
+
 #define ENSURE(name) \
   if (!real_##name) real_##name = (__typeof__(name) *)dlsym(RTLD_NEXT, #name)
 
+static char *const *child_argv(char *const argv[], char *out[]) {
+  if (!needs_flags(argv)) return argv;
+  with_flags(argv, out);
+  return out;
+}
+
 int execve(const char *path, char *const argv[], char *const envp[]) {
   ENSURE(execve);
-  if (!needs_flags(argv)) return real_execve(path, argv, envp);
-  char *a[MAX_ARGS]; with_flags(argv, a);
-  return real_execve(path, a, envp);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  return real_execve(path, child_argv(argv, a), child_env(envp, e));
 }
 
 int execv(const char *path, char *const argv[]) {
-  ENSURE(execv);
-  if (!needs_flags(argv)) return real_execv(path, argv);
-  char *a[MAX_ARGS]; with_flags(argv, a);
-  return real_execv(path, a);
+  ENSURE(execv); ENSURE(execve);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  char *const *env = child_env(environ, e);
+  if (env != environ) return real_execve(path, child_argv(argv, a), env);
+  return real_execv(path, child_argv(argv, a));
 }
 
 int execvp(const char *file, char *const argv[]) {
-  ENSURE(execvp);
-  if (!needs_flags(argv)) return real_execvp(file, argv);
-  char *a[MAX_ARGS]; with_flags(argv, a);
-  return real_execvp(file, a);
+  ENSURE(execvp); ENSURE(execvpe);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  char *const *env = child_env(environ, e);
+  if (env != environ) return real_execvpe(file, child_argv(argv, a), env);
+  return real_execvp(file, child_argv(argv, a));
 }
 
 int execvpe(const char *file, char *const argv[], char *const envp[]) {
   ENSURE(execvpe);
-  if (!needs_flags(argv)) return real_execvpe(file, argv, envp);
-  char *a[MAX_ARGS]; with_flags(argv, a);
-  return real_execvpe(file, a, envp);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  return real_execvpe(file, child_argv(argv, a), child_env(envp, e));
 }
 
 int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *fa,
                 const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
   ENSURE(posix_spawn);
-  if (!needs_flags(argv)) return real_posix_spawn(pid, path, fa, at, argv, envp);
-  char *a[MAX_ARGS]; with_flags(argv, a);
-  return real_posix_spawn(pid, path, fa, at, a, envp);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  return real_posix_spawn(pid, path, fa, at, child_argv(argv, a), child_env(envp, e));
+}
+
+int posix_spawnp(pid_t *pid, const char *file, const posix_spawn_file_actions_t *fa,
+                 const posix_spawnattr_t *at, char *const argv[], char *const envp[]) {
+  ENSURE(posix_spawnp);
+  char *a[MAX_ARGS], *e[MAX_ENV];
+  return real_posix_spawnp(pid, file, fa, at, child_argv(argv, a), child_env(envp, e));
 }

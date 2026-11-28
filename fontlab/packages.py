@@ -40,6 +40,21 @@ class Manifest:
     version: str
     weights: list[str] = field(default_factory=lambda: ["400"])
     replaces: list[str] = field(default_factory=list)   # system files hidden while installed
+    # System files the build read, with fingerprint(): a package update changes them.
+    inputs: dict[str, str] = field(default_factory=dict)
+
+
+def fingerprint(path: Path) -> str:
+    """Changes whenever a package manager replaces the file (new inode, size or mtime)."""
+    try:
+        st = path.stat()
+    except OSError:
+        return ""
+    return f"{st.st_ino}:{st.st_size}:{st.st_mtime_ns}"
+
+
+def fingerprints(files) -> dict[str, str]:
+    return {str(f): fingerprint(Path(f)) for f in files}
 
 
 def font_dirs() -> list[Path]:
@@ -83,6 +98,7 @@ class Package:
     weight_key: str | None = None       # setting that picks the weight; None = always 400
     darkens: bool = False               # gets the `darkening` setting (TrueType outlines only)
     system_base: bool = False           # weight 400 is the system font itself: install nothing
+    built_on_system: bool = False       # built from installed system files (Manifest.inputs)
 
     def install_sources(self) -> list[Source]:
         """Ways to install, first one is the default."""
@@ -107,6 +123,21 @@ class Package:
     @property
     def installed(self) -> bool:
         return self.manifest() is not None
+
+    def changed_inputs(self, manifest: Manifest | None = None) -> list[str]:
+        """System files this package was built from that changed or vanished since (a
+        system update). Its files are then stale and must not hide the new system font.
+        Manifests from before `inputs` existed: the replaced files, checked by ctime."""
+        manifest = manifest or self.manifest()
+        if manifest is None or not self.built_on_system:
+            return []
+        if manifest.inputs:
+            return [f for f, fp in manifest.inputs.items() if fingerprint(Path(f)) != fp]
+        try:
+            built = (self.root / "manifest.json").stat().st_mtime
+        except OSError:
+            return []
+        return [f for f in manifest.replaces if Path(f).exists() and Path(f).stat().st_ctime > built + 1]
 
     def blocker(self, folder: Path | None = None) -> str | None:
         """Why this package cannot be installed here, or None."""
@@ -164,7 +195,7 @@ class Inter(Package):
 
 class AdwaitaSans(Package):
     id, name = "adwaita", "Adwaita Sans"
-    weight_key, darkens = "ui_weight", True
+    weight_key, darkens, built_on_system = "ui_weight", True, True
 
     def install_sources(self):
         return [Source("Build from the installed copy")]
@@ -182,12 +213,13 @@ class AdwaitaSans(Package):
         regular, italic = self.system_files()
         progress("building Adwaita Sans static family")
         run_builder(["adwaita", str(regular.parent), str(stage), *WEIGHTS])
-        return Manifest(f"from {regular.parent}", ["400", *WEIGHTS], [str(regular), str(italic)])
+        return Manifest(f"from {regular.parent}", ["400", *WEIGHTS], [str(regular), str(italic)],
+                        fingerprints([regular, italic]))
 
 
 class JetBrainsMono(Package):
     id, name = "jbm", "JetBrains Mono"
-    weight_key, system_base = "mono_weight", True
+    weight_key, system_base, built_on_system = "mono_weight", True, True
 
     def install_sources(self):
         return [Source("Build on the installed copy")]
@@ -214,7 +246,8 @@ class JetBrainsMono(Package):
         progress("building JetBrains Mono weights")
         run_builder(["jetbrains-mono", str(regular), str(italic), str(release / "fonts/variable"),
                      str(stage), *WEIGHTS])
-        return Manifest(f"{self.VERSION} on {regular.name}", ["400", *WEIGHTS], [str(regular), str(italic)])
+        return Manifest(f"{self.VERSION} on {regular.name}", ["400", *WEIGHTS], [str(regular), str(italic)],
+                        fingerprints([regular, italic]))
 
 
 class GoogleSansFlex(Package):
@@ -405,10 +438,17 @@ BY_ID: dict[str, Package] = {p.id: p for p in PACKAGES}
 
 
 
+def outdated_notices() -> list[str]:
+    """One notice per package whose system source changed since it was built."""
+    return [f"{p.name}: the system copy changed since fontlab built it, so the system font is "
+            f"used for now. Rebuild with: fontlab fonts install {p.id}"
+            for p in PACKAGES if p.changed_inputs()]
+
+
 def unlocking(key: str) -> list[Package]:
     """Packages that give a setting something to act on (weights, darkening)."""
     return [p for p in PACKAGES if p.weight_key == key or (key == "darkening" and p.darkens)]
 
 
 __all__ = ["PACKAGES", "BY_ID", "Package", "PackageError", "Manifest", "Source", "ToolError", "WEIGHTS",
-           "unlocking"]
+           "outdated_notices", "unlocking"]

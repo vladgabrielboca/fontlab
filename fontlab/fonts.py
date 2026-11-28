@@ -25,6 +25,9 @@ from .toolchain import run_builder
 DARKEN_X_EM = 0.0121
 DARKEN_Y_EM = 0.0121 * 1.25
 KEEP_BUILDS = 16
+# Bump when builders/darken.py changes its output, so cached builds are made again.
+# 2: TrueType hinting is dropped from darkened fonts.
+DARKEN_VERSION = 2
 MARKER = ".fontlab-key"
 
 
@@ -69,12 +72,12 @@ def plan(state: State) -> list[FontSet]:
     sets = []
     for family in families():
         manifest = family.manifest()
-        if manifest is None:
+        if manifest is None or family.changed_inputs(manifest):   # stale: system font wins
             sets.append(FontSet(family, "", (), 0.0, ()))
             continue
         weight = state[family.weight_key] if family.weight_key else "400"
         darken = float(state["darkening"]) if family.darkens else 0.0
-        key = weight if darken == 0 else f"{weight}-d{state['darkening']}"
+        key = weight if darken == 0 else f"{weight}-d{state['darkening']}v{DARKEN_VERSION}"
         key += "-" + hashlib.sha1(manifest.version.encode()).hexdigest()[:6]   # rebuild on reinstall
         files = tuple(source_files(family, manifest, weight))
         sets.append(FontSet(family, key, files, darken, tuple(manifest.replaces)))

@@ -9,9 +9,10 @@ import unittest
 from pathlib import Path
 
 import os
+import shutil
 import subprocess
 
-from fontlab import apps, chromium, desktop, fontconfig, fonts, paths, vencord
+from fontlab import apps, chromium, desktop, fontconfig, fonts, packages, paths, vencord
 from fontlab import state as statefile
 from fontlab.availability import Context
 from fontlab.packages import BY_ID, Manifest, WindowsFonts
@@ -107,6 +108,7 @@ class AvailabilityTest(TempHome):
         self.assertEqual(ctx.setting_blocker(BY_KEY["hinting"]), None)
         self.assertIn("Inter", ctx.setting_blocker(BY_KEY["ui_weight"]))
         self.assertIn("shim", ctx.setting_blocker(BY_KEY["gamma"]))
+        self.assertIn("shim", ctx.setting_blocker(BY_KEY["chromium_hinting"]))
         self.assertEqual(ctx.choices(BY_KEY["web_fonts"]), ["system"])
 
     def test_preset_from_another_machine_falls_back(self) -> None:
@@ -623,6 +625,112 @@ class EnvironmentTest(unittest.TestCase):
 
     def test_keep_never_touches_the_file(self) -> None:
         self.assertFalse(desktop.environment_pending(dict(DEFAULTS)))
+
+
+class StaleSystemPackageTest(TempHome):
+    """adwaita and jbm are built from system files; a system update must not leave the
+    old copy installed and hiding the new one."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.system = self.home / "usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf"
+        self.fake_font(self.system, "v1")
+        self.fake_package("jbm", {"475": ["JetBrainsMonoNerdFont-Regular.ttf"]}, replaces=[str(self.system)])
+        f = paths.P.sources / "jbm/manifest.json"
+        data = json.loads(f.read_text())
+        f.write_text(json.dumps(data | {"inputs": packages.fingerprints([self.system])}))
+        self.state = dict(DEFAULTS, mono_weight="475")
+
+    def rejects(self) -> list[str]:
+        return [g for fs in fonts.plan(self.state) for g in fs.rejects]
+
+    def test_unchanged_input_installs(self) -> None:
+        self.assertEqual(BY_ID["jbm"].changed_inputs(), [])
+        self.assertIn(str(self.system), self.rejects())
+        self.assertEqual(packages.outdated_notices(), [])
+
+    def test_system_update_falls_back_to_the_system_font(self) -> None:
+        self.system.unlink()                     # pacman writes a new file
+        self.fake_font(self.system, "v2, longer")
+        self.assertEqual(BY_ID["jbm"].changed_inputs(), [str(self.system)])
+        self.assertNotIn(str(self.system), self.rejects())
+        jbm = next(fs for fs in fonts.plan(self.state) if fs.family.id == "jbm")
+        self.assertEqual(jbm.sources, ())
+        self.assertIn("fontlab fonts install jbm", packages.outdated_notices()[0])
+
+    def test_downloaded_packages_never_go_stale(self) -> None:
+        self.fake_package("inter", {"400": ["Inter-Regular.ttf"]}, replaces=[str(self.system)])
+        self.system.unlink()
+        self.assertEqual(BY_ID["inter"].changed_inputs(), [])
+
+
+class ShimEnvironmentTest(TempHome):
+    """FONTCONFIG_FILE pointing at chromium-fonts.conf is for the Chromium process only."""
+
+    REPO = Path(__file__).resolve().parent.parent
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.conf = self.home / ".config/fontlab/chromium-fonts.conf"
+        self.fake_font(self.conf, "<fontconfig/>")
+
+    def env(self, **extra: str) -> dict[str, str]:
+        env = {k: v for k, v in os.environ.items() if k not in ("FONTCONFIG_FILE", "LD_PRELOAD")}
+        return env | {"HOME": str(self.home)} | extra
+
+    def test_launcher_preloads_shim_without_exporting_fontconfig(self) -> None:
+        runtime = paths.P.runtime_dir
+        self.fake_font(runtime / "fontlab-text-shim.so")
+        env_sh = self.REPO / "chromium/chromium-env.sh"
+        out = subprocess.run(["sh", "-c", f'. "{env_sh}"; printf "%s|%s" "$LD_PRELOAD" "${{FONTCONFIG_FILE-unset}}"'],
+                             env=self.env(), capture_output=True, text=True).stdout
+        self.assertEqual(out, f"{runtime / 'fontlab-text-shim.so'}|unset")
+        self.conf.unlink()
+        out = subprocess.run(["sh", "-c", f'. "{env_sh}"; printf "%s" "${{LD_PRELOAD-unset}}"'],
+                             env=self.env(), capture_output=True, text=True).stdout
+        self.assertEqual(out, "unset")
+
+    @unittest.skipUnless(shutil.which("cc"), "needs a C compiler")
+    def test_children_do_not_inherit_private_fontconfig(self) -> None:
+        so = self.home / "shim.so"
+        subprocess.run(["cc", "-O2", "-shared", "-fPIC", "-o", str(so),
+                        str(self.REPO / "chromium/text-shim.c"), "-ldl"], check=True)
+        app = self.home / "app"                  # looks like a Chromium install to the shim
+        app.mkdir()
+        shutil.copy2(shutil.which("sh"), app / "app")
+        for n in ("icudtl.dat", "resources.pak"):
+            (app / n).write_text("")
+        script = ('printf "%s|" "${FONTCONFIG_FILE-unset}"; '
+                  'env | grep -c "^FONTCONFIG_FILE=" || true')
+        run = lambda **e: subprocess.run([str(app / "app"), "-c", script], env=self.env(LD_PRELOAD=str(so), **e),
+                                         capture_output=True, text=True).stdout.strip()
+        self.assertEqual(run(), f"{self.conf}|0")                    # app has it, child does not
+        self.assertEqual(run(FONTCONFIG_FILE="/mine.conf"), "/mine.conf|1")   # user's own value stays
+
+
+class AppImageProbeTest(TempHome):
+    def script(self, body: str) -> Path:
+        p = self.home / "Thing.AppImage"
+        p.write_text("#!/bin/sh\n" + body + "\n")
+        p.chmod(0o755)
+        return p
+
+    def test_runtime_that_ignores_mount_times_out(self) -> None:
+        import time
+        p = self.script("sleep 30")
+        start = time.monotonic()
+        self.assertIsNone(apps.Detector.check_appimage(p, timeout=0.5))
+        self.assertLess(time.monotonic() - start, 5)
+
+    def test_empty_output_is_not_the_current_folder(self) -> None:
+        self.assertIsNone(apps.Detector.check_appimage(self.script("echo; sleep 30"), timeout=2))
+
+    def test_mounted_electron_app(self) -> None:
+        mount = self.home / "mnt"
+        for n in ("icudtl.dat", "resources.pak"):
+            self.fake_font(mount / n)
+        p = self.script(f'echo "{mount}"; sleep 30')
+        self.assertEqual(apps.Detector.check_appimage(p, timeout=5), "Electron AppImage")
 
 
 if __name__ == "__main__":

@@ -27,9 +27,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
+import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -255,26 +258,61 @@ class Detector:
         return package_reason(p)
 
     @staticmethod
-    def check_appimage(p: Path) -> str | None:
-        """Mount the AppImage read-only (this runs only its runtime, not the app) and look."""
+    def check_appimage(p: Path, timeout: float = 5.0) -> str | None:
+        """Mount the AppImage read-only (this runs only its runtime, not the app) and look.
+        A runtime that ignores --appimage-mount (it may start the app instead) prints
+        nothing; after `timeout` seconds it is killed and the AppImage counts as unknown."""
         try:
-            proc = subprocess.Popen([str(p), "--appimage-mount"], stdout=subprocess.PIPE,
-                                    stderr=subprocess.DEVNULL, text=True)
+            proc = subprocess.Popen([str(p), "--appimage-mount"], stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                    start_new_session=True)
         except OSError:
             return None
         try:
-            mount = Path((proc.stdout.readline() if proc.stdout else "").strip())
-            if mount.is_dir():
+            line = read_line(proc, timeout).strip()
+            mount = Path(line) if line.startswith("/") else None
+            if mount and mount.is_dir():
                 for d in [mount, *mount.glob("*/"), *mount.glob("usr/lib/*/")]:
                     if chromium_dir(d):
                         return "Electron AppImage"
             return None
         finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            stop(proc)
+
+
+def read_line(proc: subprocess.Popen, timeout: float) -> str:
+    """First line of proc's stdout, or "" if no whole line arrives within timeout seconds."""
+    if not proc.stdout:
+        return ""
+    fd, buf = proc.stdout.fileno(), b""
+    deadline = time.monotonic() + timeout
+    with selectors.DefaultSelector() as sel:
+        sel.register(fd, selectors.EVENT_READ)
+        while b"\n" not in buf:
+            left = deadline - time.monotonic()
+            if left <= 0 or not sel.select(left):
+                return ""
+            chunk = os.read(fd, 4096)
+            if not chunk:
+                return ""
+            buf += chunk
+    return buf.split(b"\n", 1)[0].decode(errors="replace")
+
+
+def stop(proc: subprocess.Popen) -> None:
+    """Stop proc and anything it started (its own session), politely first."""
+    for sig, wait in ((signal.SIGTERM, 5), (signal.SIGKILL, None)):
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=wait)
+            break
+        except subprocess.TimeoutExpired:
+            continue
+    if proc.stdout:
+        proc.stdout.close()
 
 
 def run(cmd: list[str]) -> str:

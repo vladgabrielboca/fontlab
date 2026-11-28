@@ -7,8 +7,8 @@ every app renders exactly as without fontlab. It passes --text-contrast/--text-g
 UI) and preloads the shim, which adds them to renderer launches (web pages); Chromium
 does not forward these switches to renderers by itself.
 
-Private fontconfig (chromium_fonts_conf), exported as FONTCONFIG_FILE by chromium-env.sh
-whenever web_fonts is not "system" or chromium_hinting differs from the desktop's hinting:
+Private fontconfig (chromium_fonts_conf), set as FONTCONFIG_FILE by the shim inside the
+Chromium process only (children do not inherit it, see text-shim.c child_env), whenever web_fonts is not "system" or chromium_hinting differs from the desktop's hinting:
 - CSS system-ui: Chromium takes it from the GTK UI font (gsettings font-name, e.g.
   "Adwaita Sans 11") and never asks fontconfig for "system-ui", so the web font rules miss
   it. The private file maps that family to the web font, for Chromium apps only; GTK apps

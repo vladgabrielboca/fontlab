@@ -1,7 +1,8 @@
 """macOS-style stem darkening baked into TrueType outlines.
 
 Every outline edge moves outward by xem (horizontal) and yem (vertical) em per side.
-Advances stay the same, like macOS. The point shifting is FreeType's
+Advances stay the same, like macOS. TrueType hinting is dropped: it was written for
+the old outlines (see hinting.py). The point shifting is FreeType's
 FT_Outline_EmboldenXY algorithm. macOS 10.13 factors (reverse-engineered by Pathfinder):
 0.0121 em horizontal, 0.0121 * 1.25 em vertical, exact below ~25 px.
 """
@@ -9,6 +10,8 @@ FT_Outline_EmboldenXY algorithm. macOS 10.13 factors (reverse-engineered by Path
 import math
 
 from fontTools.ttLib import TTFont
+
+from hinting import drop_hinting
 
 
 def signed_area(pts):
@@ -80,6 +83,7 @@ def darken(src, dst, xem, yem):
         if g.isComposite():
             g.recalcBounds(glyf)
             hmtx[name] = (hmtx[name][0], g.xMin)
+    drop_hinting(font)
     font.save(dst)
     return dst
 

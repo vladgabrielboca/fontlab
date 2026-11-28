@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
-from . import chromium, desktop, fontconfig, fonts, paths, vencord
+from . import chromium, desktop, fontconfig, fonts, packages, paths, vencord
 from .availability import Context
 from .fsutil import remove, write_if_changed
 from .state import State
@@ -32,6 +32,7 @@ def apply(state: State, *, system: bool = False, progress: Progress = lambda _ms
     report = Report()
     ctx = Context.detect()
     state, report.notices = ctx.effective(state)
+    report.notices += packages.outdated_notices()
 
     progress("fonts")
     fonts_changed, sets = fonts.install(state)

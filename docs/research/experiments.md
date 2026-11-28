@@ -173,3 +173,21 @@ Dead ends confirmed this run (see Ruled out): `w450 + d>=0.05`, `w450 + g>=1.3`,
 ### Open: the display pipeline at 320Hz
 
 The same monitor on Windows runs 144-240Hz; on Linux the mode is `2560x1440@320` (mode clock 1,289,060 kHz = 30.9 Gb/s at 8bpc, above DP 1.4's 25.92 Gb/s net, so **DSC is in use**; 240Hz at 992,250 kHz = 23.8 Gb/s is not). `modetest -c` also exposes `dithering mode: auto`, `NV_CONNECTOR_COLOR_FORMAT: auto`, `NV_CONNECTOR_OUTPUT_BPC: auto`, and the panel is 8bit+FRC. Whether DSC/FRC/temporal dithering soften 1px text on the glass (while `grim` still captures the clean framebuffer) is not measurable from inside the session: it needs an eye or a photo. Test by switching to 240Hz, then `dithering mode off`, then `render:cm_enabled false`.
+
+## Experiment 8 (2026-11-28): do renderers need FONTCONFIG_FILE?
+
+The shim and `chromium-env.sh` used to leave `FONTCONFIG_FILE=~/.config/fontlab/chromium-fonts.conf` in the environment, so every program an Electron app started (a terminal in an editor or in T3 Code) used Chromium's private fontconfig. The fix drops it from every child of the Chromium process (`child_env()` in `text-shim.c`). This checks that web pages still get the private rules.
+
+- **Setup**: fake `HOME` with a `chromium-fonts.conf` that includes `/etc/fonts/fonts.conf` and maps the family `FontlabProbe` to `Liberation Mono` (strong prepend). `/opt/brave-origin-bin/brave --headless=new` (Chromium is not installed on this machine any more, so `/usr/bin/chromium` in the render-benchmark skill no longer exists). The page measures `ctx.measureText('iiiiiiiiii')` at `40px` in a canvas (renderer process) and reports to a local HTTP server.
+- **Brave quirk**: headless Brave never loads the start URL and never exits on `--dump-dom` or `--screenshot`. Open the page with `--remote-debugging-port=9333` and `curl -X PUT "http://127.0.0.1:9333/json/new?<url>"`.
+
+| shim | `FontlabProbe` | `Liberation Mono` | `sans-serif` |
+|---|---|---|---|
+| none | 111.1 (fallback) | 240.0 | 96.9 |
+| old (env kept in children) | 240.0 | 240.0 | 96.9 |
+| new (env dropped from children) | 240.0 | 240.0 | 96.9 |
+
+### Findings
+
+1. Renderers resolve families through the browser process (font IPC), so the variable is only needed in the process that loaded the shim. Dropping it from children changes nothing in pages.
+2. A fake Chromium app (a copy of `sh` next to empty `icudtl.dat` and `resources.pak`) sees the variable itself, and its `execve` children do not. A `FONTCONFIG_FILE` the user set is passed on unchanged. This is now `ShimEnvironmentTest`.
